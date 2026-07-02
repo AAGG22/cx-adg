@@ -1,6 +1,6 @@
 {
-  "name": "Fluyo",
-  "short_name": "Fluyo",
+  "name": "cx-adg",
+  "short_name": "cx-adg",
   "description": "Editor de diagramas animados de arquitectura, gratis y local-first.",
   "start_url": ".",
   "display": "standalone",

@@ -1,4 +1,4 @@
-# Fluyo — diagramas que fluyen
+# cx-adg — diagramas CX
 
 Editor de diagramas de arquitectura **animados**, con exportación a **GIF, PNG, JPG y SVG** directamente desde el navegador. Sin cuenta, sin backend, sin que tus diagramas salgan de tu máquina: todo (edición, animación y codificación del GIF) ocurre 100% en el cliente.
 
@@ -7,7 +7,7 @@ Editor de diagramas de arquitectura **animados**, con exportación a **GIF, PNG,
 - Formas clásicas (caja, cilindro/BD, rombo, círculo, hexágono, texto) + iconos cloud (GCP, AWS, Azure, Kafka, K8s…)
 - Conexiones estilo draw.io: flechas direccionales al pasar el mouse, anclaje por lado, ruteo ortogonal y codos editables
 - Selección múltiple con marco, copiar / cortar / pegar / duplicar (`Ctrl+C/X/V/D`, `Ctrl+A`)
-- Páginas múltiples con pestañas; guardar y abrir archivos `.fluyo.json`
+- Páginas múltiples con pestañas; guardar y abrir archivos `.cx-adg.json`
 - Pegar imágenes externas con `Ctrl+V` o arrastrándolas al lienzo
 - Animación de flujo en las flechas, pulso por nodo y aparición secuencial
 - Export GIF con loop perfectamente cíclico, PNG con fondo transparente, JPG y SVG, hasta 1920×1080
@@ -18,19 +18,19 @@ Editor de diagramas de arquitectura **animados**, con exportación a **GIF, PNG,
 
 ## Exportación
 
-Fluyo permite exportar diagramas como GIF, PNG, JPG y SVG.
+cx-adg permite exportar diagramas como GIF, PNG, JPG y SVG.
 
 SVG es útil cuando necesitas conservar el diagrama como gráfico vectorial editable para documentación, presentaciones o herramientas de diseño.
 
 ## Privacidad y almacenamiento local
 
-Fluyo no requiere cuenta ni backend. Los diagramas se procesan localmente en el navegador.
+cx-adg no requiere cuenta ni backend. Los diagramas se procesan localmente en el navegador.
 
 Si el autoguardado está activo, la última sesión se almacena en `localStorage` del navegador del usuario.
 
 ## Uso offline
 
-Fluyo incluye una base PWA para cargar la aplicación como experiencia local/offline. Algunas funciones pueden depender de recursos externos si se mantienen dependencias vía CDN.
+cx-adg incluye una base PWA para cargar la aplicación como experiencia local/offline. Algunas funciones pueden depender de recursos externos si se mantienen dependencias vía CDN.
 
 La exportación GIF usa [gif.js](https://github.com/jnordberg/gif.js) desde CDN. El service worker intenta precachear `gif.js` y `gif.worker.js` en la primera visita online; si no están en caché, la exportación GIF puede fallar offline. PNG, JPG, SVG y el resto de la app funcionan sin conexión una vez cargada.
 
@@ -51,14 +51,14 @@ HTML + CSS + JavaScript vanilla sobre Canvas 2D. Una sola dependencia externa: [
 
 ```bash
 npm i -g vercel      # una sola vez
-cd fluyo
+cd cx-adg
 vercel               # primer deploy (preview)
 vercel --prod        # deploy a producción
 ```
 
 ### Dominio propio
 
-En el dashboard de Vercel → Settings → Domains puedes apuntar `fluyo.app`, `fluyo.dev` o el que registres. Vercel gestiona el certificado SSL automáticamente.
+En el dashboard de Vercel → Settings → Domains puedes apuntar `cx-adg.app`, `cx-adg.dev` o el que registres. Vercel gestiona el certificado SSL automáticamente.
 
 ## Desarrollo local
 

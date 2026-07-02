@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fluyo — diagramas que fluyen</title>
+<title>cx-adg — diagramas CX</title>
 <meta name="description" content="Crea diagramas animados de arquitectura y exporta GIF, PNG o JPG directo desde el navegador. Gratis, sin cuenta, sin backend.">
-<meta property="og:title" content="Fluyo — diagramas que fluyen">
+<meta property="og:title" content="cx-adg — diagramas CX">
 <meta property="og:description" content="Diagramas animados de arquitectura con export a GIF, PNG y JPG. Gratis y directo en tu navegador.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161616'/%3E%3Ccircle cx='18' cy='32' r='7' fill='%23d08b5b'/%3E%3Ccircle cx='40' cy='32' r='5' fill='%23d08b5b' opacity='.65'/%3E%3Ccircle cx='54' cy='32' r='3.4' fill='%23d08b5b' opacity='.35'/%3E%3C/svg%3E">
@@ -171,7 +171,7 @@
 <body>
 
 <header>
-  <span class="logo">flu<b>yo</b><span class="dots" aria-hidden="true"><span></span><span></span><span></span></span></span>
+  <span class="logo">cx<b>adg</b><span class="dots" aria-hidden="true"><span></span><span></span><span></span></span></span>
   <button id="btnDemo">Ejemplo</button>
   <button id="btnClear">Limpiar página</button>
   <span class="spacer"></span>
@@ -184,9 +184,9 @@
     <input type="checkbox" id="chkGrid" checked style="accent-color:var(--accent); width:15px; height:15px;"> Cuadrícula
   </label>
   <button id="btnPlay" class="toggled">⏸ Pausa</button>
-  <button id="btnJsonOut" title="Guardar archivo .fluyo.json (Ctrl+S)">💾 Guardar</button>
+  <button id="btnJsonOut" title="Guardar archivo .cx-adg.json (Ctrl+S)">💾 Guardar</button>
   <button id="btnJsonIn" title="Abrir archivo guardado">📂 Abrir</button>
-  <input type="file" id="fileIn" accept=".json,.fluyo" style="display:none">
+  <input type="file" id="fileIn" accept=".json,.cx-adg" style="display:none">
   <input type="file" id="imgIn" accept="image/*" style="display:none">
   <button id="btnExport" class="primary">⬇ Exportar</button>
 </header>
@@ -529,7 +529,7 @@ function copySel(){
   const es=P().edges.filter(e=>ids.has(e.from)&&ids.has(e.to)).map(deep);
   clip={nodes:ns, edges:es};
   // marca el portapapeles del sistema para que Ctrl+V priorice las formas
-  try{ navigator.clipboard.writeText("fluyo::"+JSON.stringify(clip)).catch(()=>{}); }catch(e){}
+  try{ navigator.clipboard.writeText("cx-adg::"+JSON.stringify(clip)).catch(()=>{}); }catch(e){}
 }
 function cutSel(){ copySel(); deleteSel(); }
 function pasteClip(){
@@ -575,11 +575,11 @@ function undo(){ if(!undoStack.length) return; redoStack.push(snapPage()); apply
 function redo(){ if(!redoStack.length) return; undoStack.push(snapPage()); applySnap(redoStack.pop()); scheduleAutosave(); }
 
 /* ===================== Autoguardado local ===================== */
-const AUTOSAVE_KEY="fluyo.autosave.v1";
+const AUTOSAVE_KEY="cx-adg.autosave.v1";
 const AUTOSAVE_DELAY=500;
 let autosaveTimer=null, autosavePaused=false, autosaveReady=true, autosaveSuppressed=0;
 
-function serializeProject(){ return {version:3,app:"fluyo",doc,settings}; }
+function serializeProject(){ return {version:3,app:"cx-adg",doc,settings}; }
 function canAutosave(){ return autosaveReady && !autosavePaused && autosaveSuppressed===0; }
 function suppressAutosave(){
   autosaveSuppressed++;
@@ -1429,7 +1429,7 @@ document.addEventListener("paste", ev=>{
   if(ev.target.tagName==="TEXTAREA"||ev.target.tagName==="INPUT") return;
   clearTimeout(pasteTimer);
   const txt=ev.clipboardData.getData("text/plain")||"";
-  if(txt.startsWith("fluyo::")){
+  if(txt.startsWith("cx-adg::")){
     try{ clip=JSON.parse(txt.slice(7)); }catch(e){}
     pasteClip(); ev.preventDefault(); return;
   }
@@ -1440,7 +1440,7 @@ document.addEventListener("paste", ev=>{
       return;
     }
   }
-  // sin imagen ni datos fluyo: pegar el portapapeles interno si existe
+  // sin imagen ni datos cx-adg: pegar el portapapeles interno si existe
   if(clip) pasteClip();
 });
 cv.addEventListener("dragover", ev=>ev.preventDefault());
@@ -1662,7 +1662,7 @@ if(hasAutosave()) showAutosaveRestorePrompt();
 function saveJSON(){
   const blob=new Blob([JSON.stringify(serializeProject(),null,2)],{type:"application/json"});
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob); a.download="diagrama.fluyo.json"; a.click();
+  a.href=URL.createObjectURL(blob); a.download="diagrama.cx-adg.json"; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),3000);
 }
 $("btnJsonOut").onclick=saveJSON;
@@ -1694,7 +1694,7 @@ $("fileIn").onchange=ev=>{
       $("speedIn").value=settings.speed; $("dotsIn").value=settings.dots;
       $("buildChk").checked=settings.build; $("staggerIn").value=settings.stagger;
       clearSel(); renderTabs(); centerView();
-    }catch(e){ alert("El archivo no es un diagrama Fluyo válido."); }
+    }catch(e){ alert("El archivo no es un diagrama cx-adg válido."); }
   });
   ev.target.value="";
 };
@@ -1763,10 +1763,10 @@ function downloadTextFile(filename, content, mimeType){
 }
 function buildSVGDefs(){
   return `<defs>
-  <marker id="fluyo-arrow-end" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+  <marker id="cx-adg-arrow-end" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
     <path d="M 0 0 L 10 4 L 0 8 z" fill="context-stroke"/>
   </marker>
-  <marker id="fluyo-arrow-start" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse" markerUnits="strokeWidth">
+  <marker id="cx-adg-arrow-start" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse" markerUnits="strokeWidth">
     <path d="M 0 0 L 10 4 L 0 8 z" fill="context-stroke"/>
   </marker>
 </defs>`;
@@ -1875,8 +1875,8 @@ function renderConnectorToSVG(e, theme){
   const lineCol=escapeAttribute(e.lineColor||T.edge);
   const dash=e.dashed? ' stroke-dasharray="8 7"':"";
   let markers="";
-  if(e.endArrow!==false) markers+=' marker-end="url(#fluyo-arrow-end)"';
-  if(e.startArrow) markers+=' marker-start="url(#fluyo-arrow-start)"';
+  if(e.endArrow!==false) markers+=' marker-end="url(#cx-adg-arrow-end)"';
+  if(e.startArrow) markers+=' marker-start="url(#cx-adg-arrow-start)"';
   const ptsStr=pts.map(p=>`${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
   const parts=[`<polyline points="${ptsStr}" fill="none" stroke="${lineCol}" stroke-width="2" stroke-linejoin="round"${dash}${markers}/>`];
   if(e.label){
