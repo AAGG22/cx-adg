@@ -93,6 +93,9 @@
   .swatches{display:flex; flex-wrap:wrap; gap:6px;}
   .swatch{width:24px; height:24px; border-radius:6px; border:2px solid transparent; cursor:pointer;}
   .swatch.sel{border-color:#fff;}
+  .alignBtns{display:flex; gap:4px;}
+  .alignBtns button{width:32px; height:28px; padding:0; font-size:14px; line-height:1;}
+  .alignBtns button.sel{border-color:var(--accent); color:var(--accent);}
   textarea#lblEdit{width:100%; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px; font:inherit; resize:vertical; min-height:40px;}
   .hint{color:var(--muted); font-size:11px; line-height:1.5;}
   .danger{color:#c97070;}
@@ -234,7 +237,7 @@
         • <b>Arrastra en el vacío</b> para seleccionar varios; <kbd>Shift</kbd>+clic suma o quita.<br>
         • <kbd>Ctrl+C</kbd> copiar · <kbd>Ctrl+X</kbd> cortar · <kbd>Ctrl+V</kbd> pegar · <kbd>Ctrl+D</kbd> duplicar · <kbd>Ctrl+A</kbd> todo.<br>
         • <kbd>Ctrl+Z</kbd> deshacer · <kbd>Ctrl+Y</kbd> rehacer.<br>
-        • Doble clic = editar texto. <kbd>Supr</kbd> borra. <kbd>Esc</kbd> cancela.<br>
+        • Doble clic = editar texto. <b>**palabra**</b> = negrita. <kbd>Supr</kbd> borra. <kbd>Esc</kbd> cancela.<br>
         • Con una flecha seleccionada, arrastra los <b>puntos huecos</b> para doblarla; doble clic en un codo lo elimina.<br>
         • Pega imágenes con <kbd>Ctrl+V</kbd>.
       </div>
@@ -251,6 +254,18 @@
         <div class="row" style="flex-direction:column; align-items:stretch;">
           <label for="lblEdit">Texto (Enter = nueva línea)</label>
           <textarea id="lblEdit"></textarea>
+          <p class="hint" style="margin-top:4px;">Negrita: <b>**palabra**</b></p>
+        </div>
+        <div class="row" id="rowTextAlign"><label>Alineación</label>
+          <div class="alignBtns" id="textAlignBtns">
+            <button type="button" data-align="left" title="Izquierda">⬅</button>
+            <button type="button" data-align="center" title="Centro">↔</button>
+            <button type="button" data-align="right" title="Derecha">➡</button>
+          </div>
+        </div>
+        <div class="row" id="rowTextColor" style="flex-direction:column; align-items:stretch;">
+          <label>Color del texto</label>
+          <div class="swatches" id="textSw"></div>
         </div>
         <div class="row" id="rowFs"><label>Tamaño de texto</label><input type="number" id="fsIn" min="8" max="96" placeholder="auto"></div>
         <div class="row" id="rowColor" style="flex-direction:column; align-items:stretch;">
@@ -490,6 +505,58 @@ const snap=v=>Math.round(v/GRID)*GRID;
 const deep=o=>JSON.parse(JSON.stringify(o));
 function hexA(col,a){ const v=parseInt(col.slice(1),16);
   return `rgba(${v>>16&255},${v>>8&255},${v&255},${a})`; }
+
+const TEXT_COLORS=[
+  {c:"#ededed", n:"Claro"},
+  {c:"#2b2620", n:"Oscuro"},
+  {c:"#111111", n:"Negro"},
+  {c:"#ffffff", n:"Blanco"},
+];
+function parseRichLine(line){
+  const segs=[], re=/\*\*(.+?)\*\*|([^*]+|\*+)/g;
+  let m;
+  while((m=re.exec(line))!==null){
+    if(m[1]!==undefined) segs.push({t:m[1], b:true});
+    else segs.push({t:m[2], b:false});
+  }
+  return segs.length?segs:[{t:String(line),b:false}];
+}
+function richFont(c, fs, bold){ c.font=`${bold?"bold ":""}${fs}px Georgia, serif`; }
+function measureRichLine(c, segs, fs){
+  let w=0;
+  segs.forEach(s=>{ richFont(c,fs,s.b); w+=c.measureText(s.t).width; });
+  return w;
+}
+function drawRichLine(c, segs, x, y, fs, fill, align){
+  const totalW=measureRichLine(c,segs,fs);
+  let ox=x;
+  if(align==="center") ox=x-totalW/2;
+  else if(align==="right") ox=x-totalW;
+  c.textAlign="left"; c.textBaseline="middle"; c.fillStyle=fill;
+  segs.forEach(s=>{
+    richFont(c,fs,s.b);
+    c.fillText(s.t,ox,y);
+    ox+=c.measureText(s.t).width;
+  });
+}
+function labelFill(obj, theme, isNode){
+  if(obj.textColor) return obj.textColor;
+  const T=THEMES[theme];
+  return isNode ? (obj.shape==="text"? obj.color : T.text) : T.edgeLbl;
+}
+function labelAnchorX(obj, cx, isNode){
+  if(!isNode) return cx;
+  const pad=9, align=obj.textAlign||"center";
+  if(align==="left") return cx-obj.w/2+pad;
+  if(align==="right") return cx+obj.w/2-pad;
+  return cx;
+}
+function svgRichContent(line){
+  return parseRichLine(line).map(s=>s.b?`<tspan font-weight="bold">${escapeXML(s.t)}</tspan>`:escapeXML(s.t)).join("");
+}
+function svgRichLineWidth(line, fs){
+  return parseRichLine(line).reduce((w,s)=>w+svgTextWidth(s.t,fs,s.b),0);
+}
 
 function newNode(shape,x,y,extra={}){
   const sizes={rect:[180,70], cylinder:[150,90], diamond:[160,100], circle:[110,110], hex:[170,80], text:[200,40], icon:[120,92], image:[220,160]};
@@ -776,19 +843,19 @@ function shapePath(c,n){
   }
 }
 function drawLabelLines(c,n,theme,baseFs,cy){
-  const T=THEMES[theme];
-  c.fillStyle = n.shape==="text"? n.color : T.text;
-  c.textAlign="center"; c.textBaseline="middle";
+  const fill=labelFill(n,theme,true);
+  const align=n.textAlign||"center";
+  const ax=labelAnchorX(n,n.x,true);
   const lines=String(n.label).split("\n");
   let fs=n.fs||baseFs;
-  c.font=`${fs}px Georgia, serif`;
+  richFont(c,fs,false);
   if(!n.fs){
-    const maxW=Math.max(...lines.map(l=>c.measureText(l).width),1);
+    const maxW=Math.max(...lines.map(l=>measureRichLine(c,parseRichLine(l),fs)),1);
     const avail=n.w-18;
-    if(maxW>avail){ fs=Math.max(10, fs*avail/maxW); c.font=`${fs}px Georgia, serif`; }
+    if(maxW>avail){ fs=Math.max(10, fs*avail/maxW); richFont(c,fs,false); }
   }
   const lh=fs*1.25, oy=cy-(lines.length-1)*lh/2;
-  lines.forEach((l,i)=>c.fillText(l,n.x,oy+i*lh));
+  lines.forEach((l,i)=>drawRichLine(c,parseRichLine(l),ax,oy+i*lh,fs,fill,align));
 }
 function nodeCorners(n){
   return [[n.x-n.w/2-6,n.y-n.h/2-6],[n.x+n.w/2+6,n.y-n.h/2-6],
@@ -911,10 +978,24 @@ function drawEdge(c,e,t,theme,isExport){
   if(e.label){
     const m=pointAt(pts,.5);
     const efs=e.fs||13;
-    c.font=efs+"px Georgia, serif"; c.textAlign="center"; c.textBaseline="middle";
-    const w=c.measureText(e.label).width;
-    c.fillStyle=T.lblBg; c.fillRect(m.x-w/2-6,m.y-efs*.85,w+12,efs*1.7);
-    c.fillStyle=T.edgeLbl; c.fillText(e.label,m.x,m.y);
+    const fill=labelFill(e,theme,false);
+    const align=e.textAlign||"center";
+    const lines=String(e.label).split("\n");
+    const lh=efs*1.35;
+    const blockH=lines.length*lh;
+    const maxW=Math.max(...lines.map(l=>measureRichLine(c,parseRichLine(l),efs)),1);
+    const padX=8, padY=6;
+    let bx=m.x;
+    if(align==="left") bx=m.x;
+    else if(align==="right") bx=m.x-maxW;
+    else bx=m.x-maxW/2;
+    c.fillStyle=T.lblBg;
+    c.fillRect(bx-padX, m.y-blockH/2-padY, maxW+padX*2, blockH+padY*2);
+    const oy=m.y-(lines.length-1)*lh/2;
+    let ax=m.x;
+    if(align==="left") ax=m.x;
+    else if(align==="right") ax=m.x;
+    lines.forEach((l,i)=>drawRichLine(c,parseRichLine(l),ax,oy+i*lh,efs,fill,align));
   }
   if(single){
     c.lineWidth=1.6;
@@ -1501,6 +1582,9 @@ function refreshPanel(){
     [...$("lineSw").children].forEach(sw=>sw.classList.toggle("sel", (obj.lineColor||"")===sw.dataset.c));
     [...$("dotSw").children].forEach(sw=>sw.classList.toggle("sel", (obj.dotColor||"")===sw.dataset.c));
   }
+  const align=obj.textAlign||"center";
+  [...$("textAlignBtns").children].forEach(b=>b.classList.toggle("sel", b.dataset.align===align));
+  [...$("textSw").children].forEach(sw=>sw.classList.toggle("sel", (obj.textColor||"")===sw.dataset.c));
 }
 PALETTE.forEach(p=>{
   const d=document.createElement("div");
@@ -1532,6 +1616,30 @@ function buildEdgeSwatches(containerId, field){
 }
 buildEdgeSwatches("lineSw","lineColor");
 buildEdgeSwatches("dotSw","dotColor");
+function buildTextSwatches(){
+  const cont=$("textSw");
+  const mk=(color,title)=>{
+    const d=document.createElement("div");
+    d.className="swatch";
+    d.style.background = color || "repeating-linear-gradient(45deg,#5a5a5a 0 4px,#2e3134 4px 8px)";
+    d.title=title; d.dataset.c=color||"";
+    d.onclick=()=>{
+      const s=singleSel();
+      if(s){ pushUndo(); s.obj.textColor=color||null; refreshPanel(); scheduleAutosave(); }
+    };
+    cont.appendChild(d);
+  };
+  mk(null,"Auto (tema)");
+  PALETTE.forEach(p=>mk(p.c,p.n));
+  TEXT_COLORS.forEach(p=>mk(p.c,p.n));
+}
+buildTextSwatches();
+$("textAlignBtns").addEventListener("click", ev=>{
+  const btn=ev.target.closest("button[data-align]");
+  if(!btn) return;
+  const s=singleSel();
+  if(s){ pushUndo(); s.obj.textAlign=btn.dataset.align; refreshPanel(); scheduleAutosave(); }
+});
 $("lblEdit").addEventListener("input", ()=>{
   const s=singleSel();
   if(s&&s.obj){
@@ -1773,7 +1881,7 @@ function buildSVGDefs(){
 }
 const SVG_NS="http://www.w3.org/2000/svg";
 let _svgMeasure=null;
-function svgTextWidth(text, fs){
+function svgTextWidth(text, fs, bold=false){
   if(!_svgMeasure){
     _svgMeasure=document.createElementNS(SVG_NS,"svg");
     _svgMeasure.setAttribute("aria-hidden","true");
@@ -1784,6 +1892,7 @@ function svgTextWidth(text, fs){
   const el=document.createElementNS(SVG_NS,"text");
   el.setAttribute("font-family","Georgia, serif");
   el.setAttribute("font-size",String(fs));
+  if(bold) el.setAttribute("font-weight","bold");
   el.textContent=text;
   _svgMeasure.appendChild(el);
   return el.getBBox().width;
@@ -1792,21 +1901,23 @@ function fitSvgFontSize(lines, baseFs, maxWidth, explicitFs){
   if(explicitFs) return explicitFs;
   let fs=baseFs;
   const avail=maxWidth;
-  let maxW=Math.max(...lines.map(l=>svgTextWidth(l,fs)),1);
+  let maxW=Math.max(...lines.map(l=>svgRichLineWidth(l,fs)),1);
   if(maxW>avail) fs=Math.max(10, fs*avail/maxW);
   return fs;
 }
 function svgLabelLines(n, theme, baseFs, cy){
   if(!n.label) return "";
-  const T=THEMES[theme];
   const lines=String(n.label).split("\n");
   const fs=fitSvgFontSize(lines, baseFs, n.w-18, n.fs||null);
   const lh=fs*1.25, oy=cy-(lines.length-1)*lh/2;
-  const fill=n.shape==="text"? n.color : T.text;
+  const fill=labelFill(n,theme,true);
+  const align=n.textAlign||"center";
+  const anchor=align==="left"?"start":align==="right"?"end":"middle";
+  const ax=labelAnchorX(n,n.x,true);
   const clipId=`clip-label-${n.id}`;
   const parts=[`<clipPath id="${clipId}"><rect x="${(n.x-n.w/2+2).toFixed(2)}" y="${(oy-fs*.6).toFixed(2)}" width="${(n.w-4).toFixed(2)}" height="${(lines.length*lh).toFixed(2)}"/></clipPath>`];
   lines.forEach((l,i)=>{
-    parts.push(`<text x="${n.x}" y="${(oy+i*lh).toFixed(2)}" font-family="Georgia, serif" font-size="${fs.toFixed(1)}" fill="${escapeAttribute(fill)}" text-anchor="middle" dominant-baseline="middle" clip-path="url(#${clipId})">${escapeXML(l)}</text>`);
+    parts.push(`<text x="${ax.toFixed(2)}" y="${(oy+i*lh).toFixed(2)}" font-family="Georgia, serif" font-size="${fs.toFixed(1)}" fill="${escapeAttribute(fill)}" text-anchor="${anchor}" dominant-baseline="middle" clip-path="url(#${clipId})">${svgRichContent(l)}</text>`);
   });
   return parts.join("\n");
 }
@@ -1881,10 +1992,23 @@ function renderConnectorToSVG(e, theme){
   const parts=[`<polyline points="${ptsStr}" fill="none" stroke="${lineCol}" stroke-width="2" stroke-linejoin="round"${dash}${markers}/>`];
   if(e.label){
     const m=pointAt(pts,.5), efs=e.fs||13;
-    const tw=svgTextWidth(e.label, efs);
-    const rx=(m.x-tw/2-6).toFixed(2), ry=(m.y-efs*.85).toFixed(2);
-    parts.push(`<rect x="${rx}" y="${ry}" width="${(tw+12).toFixed(2)}" height="${(efs*1.7).toFixed(2)}" fill="${escapeAttribute(T.lblBg)}"/>`);
-    parts.push(`<text x="${m.x.toFixed(2)}" y="${m.y.toFixed(2)}" font-family="Georgia, serif" font-size="${efs}" fill="${escapeAttribute(T.edgeLbl)}" text-anchor="middle" dominant-baseline="middle">${escapeXML(e.label)}</text>`);
+    const fill=labelFill(e,theme,false);
+    const align=e.textAlign||"center";
+    const anchor=align==="left"?"start":align==="right"?"end":"middle";
+    const lines=String(e.label).split("\n");
+    const lh=efs*1.35;
+    const maxW=Math.max(...lines.map(l=>svgRichLineWidth(l,efs)),1);
+    const padX=8, padY=6;
+    const blockH=lines.length*lh;
+    let bx=m.x;
+    if(align==="left") bx=m.x;
+    else if(align==="right") bx=m.x-maxW;
+    else bx=m.x-maxW/2;
+    parts.push(`<rect x="${(bx-padX).toFixed(2)}" y="${(m.y-blockH/2-padY).toFixed(2)}" width="${(maxW+padX*2).toFixed(2)}" height="${(blockH+padY*2).toFixed(2)}" fill="${escapeAttribute(T.lblBg)}"/>`);
+    const oy=m.y-(lines.length-1)*lh/2;
+    lines.forEach((l,i)=>{
+      parts.push(`<text x="${m.x.toFixed(2)}" y="${(oy+i*lh).toFixed(2)}" font-family="Georgia, serif" font-size="${efs}" fill="${escapeAttribute(fill)}" text-anchor="${anchor}" dominant-baseline="middle">${svgRichContent(l)}</text>`);
+    });
   }
   return parts.join("\n");
 }
