@@ -65,7 +65,7 @@
   #cv{width:100%; height:100%; display:block; cursor:default; touch-action:none;}
   #editBox{
     position:absolute; display:none; background:#000c; color:#fff; border:1px solid var(--accent);
-    border-radius:6px; padding:4px 8px; font:15px Georgia,serif; text-align:center; resize:none; overflow:hidden; z-index:5;
+    border-radius:6px; padding:4px 8px; font:15px Aptos, "Segoe UI", system-ui, sans-serif; text-align:center; resize:none; overflow:hidden; z-index:5;
   }
   /* ---- icon drawer ---- */
   #iconDrawer{
@@ -266,6 +266,9 @@
         <div class="row" id="rowTextColor" style="flex-direction:column; align-items:stretch;">
           <label>Color del texto</label>
           <div class="swatches" id="textSw"></div>
+        </div>
+        <div class="row" id="rowFont"><label>Fuente</label>
+          <select id="fontSel"></select>
         </div>
         <div class="row" id="rowFs"><label>Tamaño de texto</label><input type="number" id="fsIn" min="8" max="96" placeholder="auto"></div>
         <div class="row" id="rowColor" style="flex-direction:column; align-items:stretch;">
@@ -512,6 +515,18 @@ const TEXT_COLORS=[
   {c:"#111111", n:"Negro"},
   {c:"#ffffff", n:"Blanco"},
 ];
+const DEFAULT_FONT="aptos";
+const FONT_OPTIONS=[
+  {id:"aptos", label:"Aptos", stack:'Aptos, "Segoe UI", system-ui, sans-serif'},
+  {id:"georgia", label:"Georgia", stack:'Georgia, "Times New Roman", serif'},
+  {id:"segoe", label:"Segoe UI", stack:'"Segoe UI", system-ui, sans-serif'},
+  {id:"arial", label:"Arial", stack:"Arial, Helvetica, sans-serif"},
+  {id:"mono", label:"Monoespaciada", stack:'"Courier New", Courier, monospace'},
+];
+function fontStack(obj){
+  const f=FONT_OPTIONS.find(o=>o.id===(obj.fontFamily||DEFAULT_FONT));
+  return f?f.stack:FONT_OPTIONS[0].stack;
+}
 function parseRichLine(line){
   const segs=[], re=/\*\*(.+?)\*\*|([^*]+|\*+)/g;
   let m;
@@ -521,20 +536,20 @@ function parseRichLine(line){
   }
   return segs.length?segs:[{t:String(line),b:false}];
 }
-function richFont(c, fs, bold){ c.font=`${bold?"bold ":""}${fs}px Georgia, serif`; }
-function measureRichLine(c, segs, fs){
+function richFont(c, fs, bold, stack){ c.font=`${bold?"bold ":""}${fs}px ${stack}`; }
+function measureRichLine(c, segs, fs, stack){
   let w=0;
-  segs.forEach(s=>{ richFont(c,fs,s.b); w+=c.measureText(s.t).width; });
+  segs.forEach(s=>{ richFont(c,fs,s.b,stack); w+=c.measureText(s.t).width; });
   return w;
 }
-function drawRichLine(c, segs, x, y, fs, fill, align){
-  const totalW=measureRichLine(c,segs,fs);
+function drawRichLine(c, segs, x, y, fs, fill, align, stack){
+  const totalW=measureRichLine(c,segs,fs,stack);
   let ox=x;
   if(align==="center") ox=x-totalW/2;
   else if(align==="right") ox=x-totalW;
   c.textAlign="left"; c.textBaseline="middle"; c.fillStyle=fill;
   segs.forEach(s=>{
-    richFont(c,fs,s.b);
+    richFont(c,fs,s.b,stack);
     c.fillText(s.t,ox,y);
     ox+=c.measureText(s.t).width;
   });
@@ -554,8 +569,8 @@ function labelAnchorX(obj, cx, isNode){
 function svgRichContent(line){
   return parseRichLine(line).map(s=>s.b?`<tspan font-weight="bold">${escapeXML(s.t)}</tspan>`:escapeXML(s.t)).join("");
 }
-function svgRichLineWidth(line, fs){
-  return parseRichLine(line).reduce((w,s)=>w+svgTextWidth(s.t,fs,s.b),0);
+function svgRichLineWidth(line, fs, stack){
+  return parseRichLine(line).reduce((w,s)=>w+svgTextWidth(s.t,fs,s.b,stack),0);
 }
 
 function newNode(shape,x,y,extra={}){
@@ -845,17 +860,18 @@ function shapePath(c,n){
 function drawLabelLines(c,n,theme,baseFs,cy){
   const fill=labelFill(n,theme,true);
   const align=n.textAlign||"center";
+  const stack=fontStack(n);
   const ax=labelAnchorX(n,n.x,true);
   const lines=String(n.label).split("\n");
   let fs=n.fs||baseFs;
-  richFont(c,fs,false);
+  richFont(c,fs,false,stack);
   if(!n.fs){
-    const maxW=Math.max(...lines.map(l=>measureRichLine(c,parseRichLine(l),fs)),1);
+    const maxW=Math.max(...lines.map(l=>measureRichLine(c,parseRichLine(l),fs,stack)),1);
     const avail=n.w-18;
-    if(maxW>avail){ fs=Math.max(10, fs*avail/maxW); richFont(c,fs,false); }
+    if(maxW>avail){ fs=Math.max(10, fs*avail/maxW); richFont(c,fs,false,stack); }
   }
   const lh=fs*1.25, oy=cy-(lines.length-1)*lh/2;
-  lines.forEach((l,i)=>drawRichLine(c,parseRichLine(l),ax,oy+i*lh,fs,fill,align));
+  lines.forEach((l,i)=>drawRichLine(c,parseRichLine(l),ax,oy+i*lh,fs,fill,align,stack));
 }
 function nodeCorners(n){
   return [[n.x-n.w/2-6,n.y-n.h/2-6],[n.x+n.w/2+6,n.y-n.h/2-6],
@@ -980,10 +996,11 @@ function drawEdge(c,e,t,theme,isExport){
     const efs=e.fs||13;
     const fill=labelFill(e,theme,false);
     const align=e.textAlign||"center";
+    const stack=fontStack(e);
     const lines=String(e.label).split("\n");
     const lh=efs*1.35;
     const blockH=lines.length*lh;
-    const maxW=Math.max(...lines.map(l=>measureRichLine(c,parseRichLine(l),efs)),1);
+    const maxW=Math.max(...lines.map(l=>measureRichLine(c,parseRichLine(l),efs,stack)),1);
     const padX=8, padY=6;
     let bx=m.x;
     if(align==="left") bx=m.x;
@@ -992,10 +1009,8 @@ function drawEdge(c,e,t,theme,isExport){
     c.fillStyle=T.lblBg;
     c.fillRect(bx-padX, m.y-blockH/2-padY, maxW+padX*2, blockH+padY*2);
     const oy=m.y-(lines.length-1)*lh/2;
-    let ax=m.x;
-    if(align==="left") ax=m.x;
-    else if(align==="right") ax=m.x;
-    lines.forEach((l,i)=>drawRichLine(c,parseRichLine(l),ax,oy+i*lh,efs,fill,align));
+    const ax=m.x;
+    lines.forEach((l,i)=>drawRichLine(c,parseRichLine(l),ax,oy+i*lh,efs,fill,align,stack));
   }
   if(single){
     c.lineWidth=1.6;
@@ -1125,7 +1140,7 @@ function render(c,t,opts={}){
   }
   if(P().nodes.length===0){
     c.fillStyle=theme==="crema"?"#00000055":"#ffffff44";
-    c.font=(20/viewZoom)+"px Georgia, serif"; c.textAlign="center";
+    c.font=(20/viewZoom)+`px ${FONT_OPTIONS[0].stack}`; c.textAlign="center";
     c.fillText("Elige una forma o icono a la izquierda y haz clic aquí — o pulsa «Ejemplo»", (cv.width/2 - viewX) / viewZoom, (cv.height/2 - viewY) / viewZoom);
   }
   
@@ -1430,6 +1445,7 @@ cv.addEventListener("dblclick", ev=>{
   editBox.style.top = (screenCY - 16*viewZoom) + "px";
   editBox.style.width = (w * viewZoom) + "px";
   editBox.style.fontSize = Math.max(12, 15 * viewZoom) + "px";
+  editBox.style.fontFamily = fontStack(tgt);
   editBox.value=tgt.label||"";
   editBox.rows=(editBox.value.split("\n").length)||1;
   editBox.focus(); editBox.select();
@@ -1585,6 +1601,7 @@ function refreshPanel(){
   const align=obj.textAlign||"center";
   [...$("textAlignBtns").children].forEach(b=>b.classList.toggle("sel", b.dataset.align===align));
   [...$("textSw").children].forEach(sw=>sw.classList.toggle("sel", (obj.textColor||"")===sw.dataset.c));
+  $("fontSel").value=obj.fontFamily||DEFAULT_FONT;
 }
 PALETTE.forEach(p=>{
   const d=document.createElement("div");
@@ -1634,12 +1651,21 @@ function buildTextSwatches(){
   TEXT_COLORS.forEach(p=>mk(p.c,p.n));
 }
 buildTextSwatches();
+FONT_OPTIONS.forEach(f=>{
+  const o=document.createElement("option");
+  o.value=f.id; o.textContent=f.label;
+  $("fontSel").appendChild(o);
+});
 $("textAlignBtns").addEventListener("click", ev=>{
   const btn=ev.target.closest("button[data-align]");
   if(!btn) return;
   const s=singleSel();
   if(s){ pushUndo(); s.obj.textAlign=btn.dataset.align; refreshPanel(); scheduleAutosave(); }
 });
+$("fontSel").onchange=()=>{
+  const s=singleSel();
+  if(s){ pushUndo(); s.obj.fontFamily=$("fontSel").value; scheduleAutosave(); }
+};
 $("lblEdit").addEventListener("input", ()=>{
   const s=singleSel();
   if(s&&s.obj){
@@ -1881,7 +1907,7 @@ function buildSVGDefs(){
 }
 const SVG_NS="http://www.w3.org/2000/svg";
 let _svgMeasure=null;
-function svgTextWidth(text, fs, bold=false){
+function svgTextWidth(text, fs, bold=false, stack=FONT_OPTIONS[0].stack){
   if(!_svgMeasure){
     _svgMeasure=document.createElementNS(SVG_NS,"svg");
     _svgMeasure.setAttribute("aria-hidden","true");
@@ -1890,25 +1916,26 @@ function svgTextWidth(text, fs, bold=false){
   }
   _svgMeasure.replaceChildren();
   const el=document.createElementNS(SVG_NS,"text");
-  el.setAttribute("font-family","Georgia, serif");
+  el.setAttribute("font-family",stack);
   el.setAttribute("font-size",String(fs));
   if(bold) el.setAttribute("font-weight","bold");
   el.textContent=text;
   _svgMeasure.appendChild(el);
   return el.getBBox().width;
 }
-function fitSvgFontSize(lines, baseFs, maxWidth, explicitFs){
+function fitSvgFontSize(lines, baseFs, maxWidth, explicitFs, stack){
   if(explicitFs) return explicitFs;
   let fs=baseFs;
   const avail=maxWidth;
-  let maxW=Math.max(...lines.map(l=>svgRichLineWidth(l,fs)),1);
+  let maxW=Math.max(...lines.map(l=>svgRichLineWidth(l,fs,stack)),1);
   if(maxW>avail) fs=Math.max(10, fs*avail/maxW);
   return fs;
 }
 function svgLabelLines(n, theme, baseFs, cy){
   if(!n.label) return "";
+  const stack=fontStack(n);
   const lines=String(n.label).split("\n");
-  const fs=fitSvgFontSize(lines, baseFs, n.w-18, n.fs||null);
+  const fs=fitSvgFontSize(lines, baseFs, n.w-18, n.fs||null, stack);
   const lh=fs*1.25, oy=cy-(lines.length-1)*lh/2;
   const fill=labelFill(n,theme,true);
   const align=n.textAlign||"center";
@@ -1917,7 +1944,7 @@ function svgLabelLines(n, theme, baseFs, cy){
   const clipId=`clip-label-${n.id}`;
   const parts=[`<clipPath id="${clipId}"><rect x="${(n.x-n.w/2+2).toFixed(2)}" y="${(oy-fs*.6).toFixed(2)}" width="${(n.w-4).toFixed(2)}" height="${(lines.length*lh).toFixed(2)}"/></clipPath>`];
   lines.forEach((l,i)=>{
-    parts.push(`<text x="${ax.toFixed(2)}" y="${(oy+i*lh).toFixed(2)}" font-family="Georgia, serif" font-size="${fs.toFixed(1)}" fill="${escapeAttribute(fill)}" text-anchor="${anchor}" dominant-baseline="middle" clip-path="url(#${clipId})">${svgRichContent(l)}</text>`);
+    parts.push(`<text x="${ax.toFixed(2)}" y="${(oy+i*lh).toFixed(2)}" font-family="${escapeAttribute(stack)}" font-size="${fs.toFixed(1)}" fill="${escapeAttribute(fill)}" text-anchor="${anchor}" dominant-baseline="middle" clip-path="url(#${clipId})">${svgRichContent(l)}</text>`);
   });
   return parts.join("\n");
 }
@@ -1994,10 +2021,11 @@ function renderConnectorToSVG(e, theme){
     const m=pointAt(pts,.5), efs=e.fs||13;
     const fill=labelFill(e,theme,false);
     const align=e.textAlign||"center";
+    const stack=fontStack(e);
     const anchor=align==="left"?"start":align==="right"?"end":"middle";
     const lines=String(e.label).split("\n");
     const lh=efs*1.35;
-    const maxW=Math.max(...lines.map(l=>svgRichLineWidth(l,efs)),1);
+    const maxW=Math.max(...lines.map(l=>svgRichLineWidth(l,efs,stack)),1);
     const padX=8, padY=6;
     const blockH=lines.length*lh;
     let bx=m.x;
@@ -2007,7 +2035,7 @@ function renderConnectorToSVG(e, theme){
     parts.push(`<rect x="${(bx-padX).toFixed(2)}" y="${(m.y-blockH/2-padY).toFixed(2)}" width="${(maxW+padX*2).toFixed(2)}" height="${(blockH+padY*2).toFixed(2)}" fill="${escapeAttribute(T.lblBg)}"/>`);
     const oy=m.y-(lines.length-1)*lh/2;
     lines.forEach((l,i)=>{
-      parts.push(`<text x="${m.x.toFixed(2)}" y="${(oy+i*lh).toFixed(2)}" font-family="Georgia, serif" font-size="${efs}" fill="${escapeAttribute(fill)}" text-anchor="${anchor}" dominant-baseline="middle">${svgRichContent(l)}</text>`);
+      parts.push(`<text x="${m.x.toFixed(2)}" y="${(oy+i*lh).toFixed(2)}" font-family="${escapeAttribute(stack)}" font-size="${efs}" fill="${escapeAttribute(fill)}" text-anchor="${anchor}" dominant-baseline="middle">${svgRichContent(l)}</text>`);
     });
   }
   return parts.join("\n");
