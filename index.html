@@ -61,6 +61,12 @@
   .rail hr{width:36px; border:none; border-top:1px solid var(--line); margin:3px 0; flex-shrink:0;}
   /* ---- stage ---- */
   .stage{flex:1; display:flex; position:relative; background: #111; overflow:hidden;}
+  #workAreaBadge{
+    position:absolute; left:10px; bottom:10px; z-index:4; pointer-events:none;
+    font-size:11px; color:var(--muted); background:rgba(27,29,31,.85);
+    border:1px solid var(--line); border-radius:6px; padding:4px 8px;
+  }
+  #workAreaBadge.warn{color:#e0a0a0; border-color:#6a4040;}
   #wrap{position:relative; width:100%; height:100%; overflow:hidden;}
   #cv{width:100%; height:100%; display:block; cursor:default; touch-action:none;}
   #editBox{
@@ -223,6 +229,7 @@
       <canvas id="cv" width="2560" height="1440"></canvas>
       <textarea id="editBox" rows="1"></textarea>
     </div>
+    <div id="workAreaBadge">Área de trabajo 2560×1440</div>
     <div id="iconDrawer" role="dialog" aria-label="Iconos"></div>
   </div>
 
@@ -239,7 +246,8 @@
         • <kbd>Ctrl+Z</kbd> deshacer · <kbd>Ctrl+Y</kbd> rehacer.<br>
         • Doble clic = editar texto. <b>**palabra**</b> = negrita. <kbd>Supr</kbd> borra. <kbd>Esc</kbd> cancela.<br>
         • Con una flecha seleccionada, arrastra los <b>puntos huecos</b> para doblarla; doble clic en un codo lo elimina.<br>
-        • Pega imágenes con <kbd>Ctrl+V</kbd>.
+        • Pega imágenes con <kbd>Ctrl+V</kbd>.<br>
+        • El <b>borde punteado</b> marca el área de exportación SVG (2560×1440).
       </div>
       <div id="multiSel" style="display:none">
         <p class="hint" id="multiCount" style="font-size:12px; color:var(--text);"></p>
@@ -486,6 +494,40 @@ function getBounds(){
   });
   mx-=40; my-=40; Mx+=40; My+=40;
   return {x: mx, y: my, w: Mx-mx, h: My-my};
+}
+function workArea(){ return {x:0, y:0, w:W, h:H}; }
+function workAreaOverflow(){
+  if(P().nodes.length===0) return false;
+  const b=getBounds();
+  return b.x<0 || b.y<0 || b.x+b.w>W || b.y+b.h>H;
+}
+function drawWorkArea(c, theme){
+  const wx=-viewX/viewZoom, wy=-viewY/viewZoom;
+  const ww=cv.width/viewZoom, wh=cv.height/viewZoom;
+  const out=workAreaOverflow();
+  c.save();
+  c.fillStyle=theme==="crema"?"rgba(0,0,0,.06)":"rgba(0,0,0,.2)";
+  const y0=Math.max(wy,0), y1=Math.min(wy+wh,H);
+  const x0=Math.max(wx,0), x1=Math.min(wx+ww,W);
+  if(wy<0) c.fillRect(wx, wy, ww, -wy);
+  if(wy+wh>H) c.fillRect(wx, H, ww, wy+wh-H);
+  if(wx<0 && y1>y0) c.fillRect(wx, y0, -wx, y1-y0);
+  if(wx+ww>W && y1>y0) c.fillRect(W, y0, wx+ww-W, y1-y0);
+  c.strokeStyle=out?"#c16a6a":(theme==="crema"?"rgba(208,139,91,.55)":"rgba(208,139,91,.75)");
+  c.lineWidth=2/viewZoom;
+  c.setLineDash([14/viewZoom, 10/viewZoom]);
+  c.strokeRect(0, 0, W, H);
+  c.setLineDash([]);
+  c.restore();
+}
+function updateWorkAreaBadge(){
+  const el=$("workAreaBadge");
+  if(!el) return;
+  const out=workAreaOverflow();
+  el.textContent=out
+    ? "⚠ Contenido fuera del área 2560×1440 (se recortará en SVG)"
+    : "Área de trabajo 2560×1440";
+  el.classList.toggle("warn", out);
 }
 
 function centerView(){
@@ -1094,6 +1136,8 @@ function render(c,t,opts={}){
     c.stroke();
   }
 
+  drawWorkArea(c, theme);
+
   for(const e of P().edges) drawEdge(c,e,t,theme,isExport);
   for(const n of P().nodes) drawNode(c,n,t,theme,isExport);
 
@@ -1143,7 +1187,8 @@ function render(c,t,opts={}){
     c.font=(20/viewZoom)+`px ${FONT_OPTIONS[0].stack}`; c.textAlign="center";
     c.fillText("Elige una forma o icono a la izquierda y haz clic aquí — o pulsa «Ejemplo»", (cv.width/2 - viewX) / viewZoom, (cv.height/2 - viewY) / viewZoom);
   }
-  
+
+  updateWorkAreaBadge();
   c.restore();
 }
 function now(){ return playing? (performance.now()-t0)/1000 : pausedAt; }
@@ -1886,6 +1931,17 @@ function svgFillColor(hex, theme){
 function getExportDimensions(scale=1){
   return { width:Math.round(W*scale), height:Math.round(H*scale) };
 }
+function svgGrid(theme){
+  const col=escapeAttribute(THEMES[theme].grid);
+  const lines=[];
+  for(let x=0; x<=W; x+=GRID) lines.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="${col}" stroke-width="1"/>`);
+  for(let y=0; y<=H; y+=GRID) lines.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${col}" stroke-width="1"/>`);
+  return `<g id="grid" opacity="1">${lines.join("")}</g>`;
+}
+function svgWorkAreaFrame(theme, overflow){
+  const stroke=overflow?"#c16a6a":"#d08b5b";
+  return `<rect x="0" y="0" width="${W}" height="${H}" fill="none" stroke="${stroke}" stroke-width="2" stroke-dasharray="14 10"/>`;
+}
 function getCurrentPageForExport(){ return P(); }
 function downloadTextFile(filename, content, mimeType){
   const blob=new Blob([content],{type:mimeType});
@@ -2044,17 +2100,23 @@ function buildSVGDocument(scale=1){
   const {width,height}=getExportDimensions(scale);
   const page=getCurrentPageForExport();
   const theme=doc.theme;
+  const T=THEMES[theme];
+  const overflow=workAreaOverflow();
   const parts=[
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${W} ${H}">`,
-    buildSVGDefs()
+    buildSVGDefs(),
+    `<rect width="${W}" height="${H}" fill="${escapeAttribute(T.bg)}"/>`,
   ];
+  if(settings.grid) parts.push(svgGrid(theme));
   for(const e of page.edges||[]) parts.push(renderConnectorToSVG(e,theme));
   for(const n of page.nodes||[]) parts.push(renderNodeToSVG(n,theme));
+  parts.push(svgWorkAreaFrame(theme, overflow));
   parts.push("</svg>");
   return parts.join("\n");
 }
 function exportSVG(scale=1){
+  if(workAreaOverflow() && !confirm("Hay contenido fuera del área 2560×1440. El SVG lo recortará. ¿Exportar igual?")) return;
   downloadTextFile(slug()+".svg", buildSVGDocument(scale), "image/svg+xml;charset=utf-8");
 }
 
@@ -2065,7 +2127,9 @@ function syncExportRows(){
   $("exRowTr").style.display = (f==="png"||f==="gif") ? "flex":"none";
   $("exRowFps").style.display = f==="gif" ? "flex":"none";
   $("exRowDur").style.display = f==="gif" ? "flex":"none";
-  $("exHint").style.display = f==="gif" ? "block":"none";
+  $("exHint").style.display = (f==="gif"||f==="svg") ? "block":"none";
+  if(f==="svg") $("exHint").textContent="SVG exporta el área de trabajo fija 2560×1440 (el borde punteado del lienzo). PNG/GIF recortan solo el contenido.";
+  else if(f==="gif") $("exHint").textContent="El loop de flujo se ajusta solo para que el GIF sea cíclico. La transparencia en GIF es de bordes duros (limitación del formato); para bordes suaves usa PNG.";
 }
 $("exFmt").onchange=syncExportRows;
 $("btnExport").onclick=()=>{ exModal.style.display="flex"; syncExportRows(); };
