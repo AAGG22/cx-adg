@@ -460,6 +460,18 @@ function getImg(src){
 
 /* ===================== Documento (páginas) ===================== */
 function blankPage(name){ return {name, nodes:[], edges:[], nextId:1}; }
+function nameFromFile(fileName){
+  const n=String(fileName||"");
+  return n.replace(/\.cx-adg\.json$/i,"").replace(/\.json$/i,"").replace(/\.cx-adg$/i,"")||"diagrama";
+}
+function isDefaultPageName(name){ return /^Página \d+$/i.test(String(name||"").trim()); }
+function applyPageNamesFromFile(fileName){
+  const base=nameFromFile(fileName);
+  if(doc.pages.length===1){ doc.pages[0].name=base; return; }
+  doc.pages.forEach((pg,i)=>{
+    if(isDefaultPageName(pg.name)) pg.name=i===0?base:`${base} (${i+1})`;
+  });
+}
 let doc={ theme:"dark", pages:[blankPage("Página 1")], cur:0 };
 let settings={ speed:.5, dots:3, build:false, stagger:.45, grid:true };
 const P=()=>doc.pages[doc.cur];
@@ -749,12 +761,13 @@ function loadAutosaveData(){
 }
 function syncProjectControls(){
   $("themeSel").value=doc.theme;
+  $("chkGrid").checked=settings.grid!==false;
   $("speedIn").value=settings.speed;
   $("dotsIn").value=settings.dots;
   $("buildChk").checked=settings.build;
   $("staggerIn").value=settings.stagger;
 }
-function applyProjectData(d){
+function applyProjectData(d, opts={}){
   runWithoutAutosave(()=>{
     if(d.doc&&Array.isArray(d.doc.pages)) doc=d.doc;
     else if(d.state&&Array.isArray(d.state.nodes)){
@@ -769,7 +782,9 @@ function applyProjectData(d){
     }));
     undoStack.length=0; redoStack.length=0;
     if(d.settings) Object.assign(settings,d.settings);
+    if(settings.grid===undefined) settings.grid=true;
     doc.cur=clamp(doc.cur||0,0,doc.pages.length-1);
+    if(opts.fileName) applyPageNamesFromFile(opts.fileName);
     syncProjectControls();
     clearSel(); renderTabs();
   });
@@ -1858,29 +1873,9 @@ $("fileIn").onchange=ev=>{
   const f=ev.target.files[0]; if(!f) return;
   f.text().then(txt=>{
     try{
-      applyProjectData(JSON.parse(txt));
+      applyProjectData(JSON.parse(txt), {fileName:f.name});
       saveAutosave(true);
-      const d=JSON.parse(txt);
-      if(d.doc&&Array.isArray(d.doc.pages)){ doc=d.doc; }
-      else if(d.state&&Array.isArray(d.state.nodes)){ // formato v1
-        doc={theme:d.state.theme||"dark", cur:0,
-             pages:[Object.assign(blankPage("Página 1"),{nodes:d.state.nodes,edges:(d.state.edges||[]).map(e=>Object.assign({fromSide:null,toSide:null,route:"straight",waypoints:[]},e)),nextId:d.state.nextId||999})]};
-      } else throw 0;
-      doc.pages.forEach(pg=>pg.edges.forEach(e=>{
-        if(e.endArrow===undefined){ e.endArrow=true; e.startArrow=!!e.bidir; }
-        if(!e.flowDir) e.flowDir="normal";
-        if(!e.waypoints) e.waypoints=[];
-        if(!e.route) e.route="straight";
-      }));
-      undoStack.length=0; redoStack.length=0;
-      if(d.settings) Object.assign(settings,d.settings);
-      if(settings.grid===undefined) settings.grid=true;
-      doc.cur=clamp(doc.cur||0,0,doc.pages.length-1);
-      $("themeSel").value=doc.theme;
-      $("chkGrid").checked=settings.grid;
-      $("speedIn").value=settings.speed; $("dotsIn").value=settings.dots;
-      $("buildChk").checked=settings.build; $("staggerIn").value=settings.stagger;
-      clearSel(); renderTabs(); centerView();
+      fitWorkAreaView();
     }catch(e){ alert("El archivo no es un diagrama cx-adg válido."); }
   });
   ev.target.value="";
