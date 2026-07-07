@@ -71,8 +71,62 @@ Es fácil pensar que el zoom causa el desfase. **No**: el zoom solo cambia la c�
 1. **Borde punteado visible** en el lienzo → marca el área `2560×1440`.
 2. **Oscurecimiento fuera del área** → ves claramente cuando un nodo queda afuera.
 3. **Badge de aviso** abajo a la izquierda → “Área de trabajo 2560×1440” o advertencia si hay overflow.
-4. **SVG corregido** → fondo del tema, cuadrícula opcional, mismo `viewBox`, marco del área de trabajo.
+4. **SVG corregido** → fondo del tema (opcional transparente), cuadrícula opcional, mismo `viewBox`, marco del área de trabajo.
 5. **Confirmación al exportar** si hay contenido fuera del área.
+6. **Fondo transparente en SVG** → misma casilla que PNG/GIF en el diálogo de exportar.
+
+---
+
+## 4.1 Fondo con color vs fondo transparente (SVG)
+
+Al exportar, el modal muestra **«Fondo transparente»** cuando elegís SVG, PNG o GIF.
+
+| Opción | Qué incluye el SVG |
+|--------|-------------------|
+| **Desmarcado** (por defecto) | Rectángulo de fondo con el color del tema, cuadrícula (si está activa en el editor) y marco punteado del área |
+| **Marcado** | Solo nodos, flechas y textos — sin fondo, sin cuadrícula, sin marco |
+
+### Cómo se implementa
+
+En `buildSVGDocument(scale, transparent)` el segundo parámetro controla qué capas se agregan:
+
+```js
+function buildSVGDocument(scale = 1, transparent = false) {
+  const parts = [ /* encabezado <svg> y defs */ ];
+
+  if (!transparent) {
+    parts.push(`<rect width="${W}" height="${H}" fill="${T.bg}"/>`);
+  }
+  if (settings.grid && !transparent) {
+    parts.push(svgGrid(theme));
+  }
+
+  // nodos y flechas (siempre)
+  for (const e of page.edges) parts.push(renderConnectorToSVG(e, theme));
+  for (const n of page.nodes) parts.push(renderNodeToSVG(n, theme));
+
+  if (!transparent) {
+    parts.push(svgWorkAreaFrame(theme, overflow));
+  }
+
+  return parts.join("\n");
+}
+```
+
+El checkbox del modal se lee al exportar:
+
+```js
+exportSVG(scale, $("exTr").checked);
+```
+
+### Qué sigue teniendo fondo aunque elijas transparente
+
+Las **etiquetas de las flechas** llevan un rectángulo de fondo (`lblBg`) para que el texto se lea sobre las líneas. Eso es intencional — igual que en PNG transparente.
+
+### Cuándo usar cada modo
+
+- **Con fondo** → documentos, presentaciones, exportar “tal cual se ve el lienzo”.
+- **Transparente** → pegar el diagrama sobre otra imagen en Figma, PowerPoint, Confluence, etc.
 
 ---
 
@@ -127,7 +181,7 @@ Así solo oscurece lo que realmente estás viendo en pantalla.
 ### 5.4 Construir el SVG
 
 ```js
-function buildSVGDocument(scale = 1) {
+function buildSVGDocument(scale = 1, transparent = false) {
   const { width, height } = getExportDimensions(scale);
   const theme = doc.theme;
   const T = THEMES[theme];
@@ -136,15 +190,17 @@ function buildSVGDocument(scale = 1) {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg ... width="${width}" height="${height}" viewBox="0 0 ${W} ${H}">`,
     buildSVGDefs(),
-    `<rect width="${W}" height="${H}" fill="${T.bg}"/>`,  // ← fondo explícito
   ];
 
-  if (settings.grid) parts.push(svgGrid(theme));
+  if (!transparent) {
+    parts.push(`<rect width="${W}" height="${H}" fill="${T.bg}"/>`);
+  }
+  if (settings.grid && !transparent) parts.push(svgGrid(theme));
 
   for (const e of page.edges) parts.push(renderConnectorToSVG(e, theme));
   for (const n of page.nodes) parts.push(renderNodeToSVG(n, theme));
 
-  parts.push(svgWorkAreaFrame(theme, workAreaOverflow())); // ← marco punteado
+  if (!transparent) parts.push(svgWorkAreaFrame(theme, workAreaOverflow()));
   parts.push("</svg>");
   return parts.join("\n");
 }
@@ -155,10 +211,11 @@ function buildSVGDocument(scale = 1) {
 | Pieza | Para qué sirve |
 |-------|----------------|
 | `viewBox="0 0 W H"` | Define el sistema de coordenadas del archivo |
-| `<rect>` de fondo | Evita fondo blanco/transparente inesperado en visores |
-| `svgGrid()` | Replica la cuadrícula del editor |
+| `<rect>` de fondo | Color del tema; **omitido** si `transparent === true` |
+| `svgGrid()` | Replica la cuadrícula; solo con fondo opaco |
 | `renderNodeToSVG` / `renderConnectorToSVG` | Convierten cada objeto del modelo a XML |
-| `svgWorkAreaFrame()` | Dibuja el mismo borde punteado que ves en pantalla |
+| `svgWorkAreaFrame()` | Marco punteado; solo con fondo opaco |
+| `transparent` | Viene del checkbox «Fondo transparente» del modal |
 
 ### 5.5 Relación `width` / `height` vs `viewBox`
 
@@ -218,6 +275,7 @@ Agregar un offset en SVG sin aplicarlo en canvas (o al revés). **Siempre** toc�
 | | PNG / GIF | SVG |
 |---|-----------|-----|
 | Encuadre | Recorta al contenido (`getBounds`) | Área fija `2560×1440` |
+| Fondo transparente | Checkbox en el modal | Misma checkbox — omite fondo, grilla y marco |
 | Uso ideal | Compartir imagen rápida | Editar en Illustrator, Figma, documentación |
 | Fuera del área | Se incluye si está en bounds | Se recorta en el borde del área |
 
@@ -245,8 +303,8 @@ Pero perdés la correspondencia 1:1 con el marco visible del editor. Por eso ele
 
 | Archivo | Cambio |
 |---------|--------|
-| `index.html` | `drawWorkArea`, `workAreaOverflow`, `buildSVGDocument`, badge UI |
-| `sw.js` | Bump de caché (`cx-adg-static-v5`) para que Netlify sirva la versión nueva |
+| `index.html` | `drawWorkArea`, `workAreaOverflow`, `buildSVGDocument`, badge UI, fondo SVG opcional |
+| `sw.js` | Bump de caché al publicar (p. ej. `cx-adg-static-v6`) para que Netlify sirva la versión nueva |
 
 ---
 

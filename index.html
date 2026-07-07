@@ -182,6 +182,7 @@
 <header>
   <span class="logo">cx<b>adg</b><span class="dots" aria-hidden="true"><span></span><span></span><span></span></span></span>
   <button id="btnDemo">Ejemplo</button>
+  <button id="btnFitArea" title="Encuadrar área de trabajo 2560×1440">⊡ Área</button>
   <button id="btnClear">Limpiar página</button>
   <span class="spacer"></span>
   <select id="themeSel" title="Tema del lienzo">
@@ -247,7 +248,7 @@
         • Doble clic = editar texto. <b>**palabra**</b> = negrita. <kbd>Supr</kbd> borra. <kbd>Esc</kbd> cancela.<br>
         • Con una flecha seleccionada, arrastra los <b>puntos huecos</b> para doblarla; doble clic en un codo lo elimina.<br>
         • Pega imágenes con <kbd>Ctrl+V</kbd>.<br>
-        • El <b>borde punteado</b> marca el área de exportación SVG (2560×1440).
+        • El <b>borde punteado naranja</b> marca el área SVG (2560×1440). Usa <b>⊡ Área</b> si no lo ves.<br>
       </div>
       <div id="multiSel" style="display:none">
         <p class="hint" id="multiCount" style="font-size:12px; color:var(--text);"></p>
@@ -506,16 +507,16 @@ function drawWorkArea(c, theme){
   const ww=cv.width/viewZoom, wh=cv.height/viewZoom;
   const out=workAreaOverflow();
   c.save();
-  c.fillStyle=theme==="crema"?"rgba(0,0,0,.06)":"rgba(0,0,0,.2)";
+  c.fillStyle=theme==="crema"?"rgba(0,0,0,.06)":"rgba(0,0,0,.22)";
   const y0=Math.max(wy,0), y1=Math.min(wy+wh,H);
   const x0=Math.max(wx,0), x1=Math.min(wx+ww,W);
   if(wy<0) c.fillRect(wx, wy, ww, -wy);
   if(wy+wh>H) c.fillRect(wx, H, ww, wy+wh-H);
   if(wx<0 && y1>y0) c.fillRect(wx, y0, -wx, y1-y0);
   if(wx+ww>W && y1>y0) c.fillRect(W, y0, wx+ww-W, y1-y0);
-  c.strokeStyle=out?"#c16a6a":(theme==="crema"?"rgba(208,139,91,.55)":"rgba(208,139,91,.75)");
-  c.lineWidth=2/viewZoom;
-  c.setLineDash([14/viewZoom, 10/viewZoom]);
+  c.strokeStyle=out?"#e07070":"#d08b5b";
+  c.lineWidth=Math.max(2.5, 3/viewZoom);
+  c.setLineDash([18/viewZoom, 10/viewZoom]);
   c.strokeRect(0, 0, W, H);
   c.setLineDash([]);
   c.restore();
@@ -537,7 +538,15 @@ function centerView(){
   viewX=(r.width-b.w*viewZoom)/2 - b.x*viewZoom;
   viewY=(r.height-b.h*viewZoom)/2 - b.y*viewZoom;
 }
-setTimeout(centerView, 100);
+function fitWorkAreaView(){
+  const r=$("wrap").getBoundingClientRect();
+  if(r.width===0){ setTimeout(fitWorkAreaView,50); return; }
+  const pad=28;
+  viewZoom=Math.min((r.width-pad*2)/W, (r.height-pad*2)/H, 1);
+  viewX=(r.width-W*viewZoom)/2;
+  viewY=(r.height-H*viewZoom)/2;
+}
+setTimeout(fitWorkAreaView, 100);
 
 /* ===================== Utilidades ===================== */
 const $=id=>document.getElementById(id);
@@ -1136,8 +1145,6 @@ function render(c,t,opts={}){
     c.stroke();
   }
 
-  drawWorkArea(c, theme);
-
   for(const e of P().edges) drawEdge(c,e,t,theme,isExport);
   for(const n of P().nodes) drawNode(c,n,t,theme,isExport);
 
@@ -1188,6 +1195,7 @@ function render(c,t,opts={}){
     c.fillText("Elige una forma o icono a la izquierda y haz clic aquí — o pulsa «Ejemplo»", (cv.width/2 - viewX) / viewZoom, (cv.height/2 - viewY) / viewZoom);
   }
 
+  drawWorkArea(c, theme);
   updateWorkAreaBadge();
   c.restore();
 }
@@ -1910,8 +1918,10 @@ $("btnDemo").onclick=()=>{
   e=newEdge(B.id,D.id); e.label="topic: avisos"; e.fromSide="e"; e.toSide="w"; e.route="ortho";
   e=newEdge(C.id,E.id); e.dashed=true; e.label="persistencia";
   e=newEdge(F.id,A.id); e.label="instrucción"; e.fromSide="n"; e.toSide="s"; e.route="ortho";
-  centerView();
+  fitWorkAreaView();
 };
+
+$("btnFitArea").onclick=fitWorkAreaView;
 
 /* ===================== Exportación SVG ===================== */
 function escapeXML(value){
@@ -2096,7 +2106,7 @@ function renderConnectorToSVG(e, theme){
   }
   return parts.join("\n");
 }
-function buildSVGDocument(scale=1){
+function buildSVGDocument(scale=1, transparent=false){
   const {width,height}=getExportDimensions(scale);
   const page=getCurrentPageForExport();
   const theme=doc.theme;
@@ -2106,29 +2116,29 @@ function buildSVGDocument(scale=1){
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${W} ${H}">`,
     buildSVGDefs(),
-    `<rect width="${W}" height="${H}" fill="${escapeAttribute(T.bg)}"/>`,
   ];
-  if(settings.grid) parts.push(svgGrid(theme));
+  if(!transparent) parts.push(`<rect width="${W}" height="${H}" fill="${escapeAttribute(T.bg)}"/>`);
+  if(settings.grid && !transparent) parts.push(svgGrid(theme));
   for(const e of page.edges||[]) parts.push(renderConnectorToSVG(e,theme));
   for(const n of page.nodes||[]) parts.push(renderNodeToSVG(n,theme));
-  parts.push(svgWorkAreaFrame(theme, overflow));
+  if(!transparent) parts.push(svgWorkAreaFrame(theme, overflow));
   parts.push("</svg>");
   return parts.join("\n");
 }
-function exportSVG(scale=1){
+function exportSVG(scale=1, transparent=false){
   if(workAreaOverflow() && !confirm("Hay contenido fuera del área 2560×1440. El SVG lo recortará. ¿Exportar igual?")) return;
-  downloadTextFile(slug()+".svg", buildSVGDocument(scale), "image/svg+xml;charset=utf-8");
+  downloadTextFile(slug()+".svg", buildSVGDocument(scale, transparent), "image/svg+xml;charset=utf-8");
 }
 
 /* ===================== Exportación ===================== */
 const exModal=$("exModal");
 function syncExportRows(){
   const f=$("exFmt").value;
-  $("exRowTr").style.display = (f==="png"||f==="gif") ? "flex":"none";
+  $("exRowTr").style.display = (f==="png"||f==="gif"||f==="svg") ? "flex":"none";
   $("exRowFps").style.display = f==="gif" ? "flex":"none";
   $("exRowDur").style.display = f==="gif" ? "flex":"none";
   $("exHint").style.display = (f==="gif"||f==="svg") ? "block":"none";
-  if(f==="svg") $("exHint").textContent="SVG exporta el área de trabajo fija 2560×1440 (el borde punteado del lienzo). PNG/GIF recortan solo el contenido.";
+  if(f==="svg") $("exHint").textContent="SVG exporta el área 2560×1440. Con fondo transparente no se incluyen el color de fondo, la cuadrícula ni el marco punteado.";
   else if(f==="gif") $("exHint").textContent="El loop de flujo se ajusta solo para que el GIF sea cíclico. La transparencia en GIF es de bordes duros (limitación del formato); para bordes suaves usa PNG.";
 }
 $("exFmt").onchange=syncExportRows;
@@ -2141,7 +2151,7 @@ $("exGo").onclick=()=>{
   exModal.style.display="none";
   if(P().nodes.length===0){ alert("La página está vacía."); return; }
   if(fmt==="gif") exportGIF(scale, $("exTr").checked);
-  else if(fmt==="svg") exportSVG(scale);
+  else if(fmt==="svg") exportSVG(scale, $("exTr").checked);
   else exportStatic(fmt, scale, $("exTr").checked);
 };
 function exportStatic(fmt,scale,transparent){
