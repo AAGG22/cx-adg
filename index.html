@@ -460,16 +460,32 @@ function getImg(src){
 
 /* ===================== Documento (páginas) ===================== */
 function blankPage(name){ return {name, nodes:[], edges:[], nextId:1}; }
+let currentFileBase=null; // base del último archivo abierto (para renombrar pestañas y páginas nuevas)
 function nameFromFile(fileName){
   const n=String(fileName||"");
   return n.replace(/\.cx-adg\.json$/i,"").replace(/\.json$/i,"").replace(/\.cx-adg$/i,"")||"diagrama";
 }
-function isDefaultPageName(name){ return /^Página \d+$/i.test(String(name||"").trim()); }
+function normalizePageName(s){
+  // Normaliza espacios raros y caracteres Unicode invisibles para que los regex fallen menos.
+  return String(s||"")
+    .replace(/\u00A0/g," ")   // NBSP
+    .replace(/\u202F/g," ")  // narrow no-break space
+    .replace(/\u200B/g,"")   // zero-width space
+    .trim();
+} // NBSP/espacios raros -> espacio normal
+function isDefaultPageName(name){
+  const s=normalizePageName(name);
+  const plain=s.normalize("NFD").replace(/[\u0300-\u036f]/g,""); // quita tildes
+  return /^pagina\s+\d+$/i.test(plain);
+}
+function pageLabelFromBase(base, pageIndex){
+  return pageIndex===0 ? base : `${base} (${pageIndex+1})`;
+}
 function applyPageNamesFromFile(fileName){
   const base=nameFromFile(fileName);
   if(doc.pages.length===1){ doc.pages[0].name=base; return; }
   doc.pages.forEach((pg,i)=>{
-    if(isDefaultPageName(pg.name)) pg.name=i===0?base:`${base} (${i+1})`;
+    if(isDefaultPageName(pg.name)) pg.name=pageLabelFromBase(base,i);
   });
 }
 let doc={ theme:"dark", pages:[blankPage("Página 1")], cur:0 };
@@ -784,7 +800,10 @@ function applyProjectData(d, opts={}){
     if(d.settings) Object.assign(settings,d.settings);
     if(settings.grid===undefined) settings.grid=true;
     doc.cur=clamp(doc.cur||0,0,doc.pages.length-1);
-    if(opts.fileName) applyPageNamesFromFile(opts.fileName);
+    if(opts.fileName){
+      currentFileBase=nameFromFile(opts.fileName);
+      applyPageNamesFromFile(opts.fileName);
+    }
     syncProjectControls();
     clearSel(); renderTabs();
   });
@@ -792,6 +811,7 @@ function applyProjectData(d, opts={}){
 function restoreAutosaveSession(){
   const d=loadAutosaveData();
   if(!d) return false;
+  currentFileBase=null; // sesión local no viene de un archivo con nombre
   applyProjectData(d);
   return true;
 }
@@ -1853,7 +1873,15 @@ function renderTabs(){
   });
   const add=document.createElement("button");
   add.textContent="＋"; add.title="Nueva página"; add.style.padding="4px 10px";
-  add.onclick=()=>{ doc.pages.push(blankPage("Página "+(doc.pages.length+1))); doc.cur=doc.pages.length-1; clearSel(); renderTabs(); scheduleAutosave(); };
+  add.onclick=()=>{
+    const idx=doc.pages.length; // índice de la nueva página
+    const nm=currentFileBase
+      ? pageLabelFromBase(currentFileBase, idx)
+      : "Página "+(idx+1);
+    doc.pages.push(blankPage(nm));
+    doc.cur=doc.pages.length-1;
+    clearSel(); renderTabs(); scheduleAutosave();
+  };
   bar.appendChild(add);
 }
 
@@ -1862,9 +1890,18 @@ if(hasAutosave()) showAutosaveRestorePrompt();
 
 /* ===================== Guardar / abrir ===================== */
 function saveJSON(){
+  // Si el proyecto viene de un archivo, mantenemos consistencia renombrando pestañas
+  // que aún tengan el patrón automático "Página X".
+  if(currentFileBase){
+    doc.pages.forEach((pg,i)=>{
+      if(isDefaultPageName(pg.name)) pg.name=pageLabelFromBase(currentFileBase, i);
+    });
+  }
   const blob=new Blob([JSON.stringify(serializeProject(),null,2)],{type:"application/json"});
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob); a.download="diagrama.cx-adg.json"; a.click();
+  a.href=URL.createObjectURL(blob);
+  a.download=(currentFileBase? `${currentFileBase}.cx-adg.json` : "diagrama.cx-adg.json");
+  a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),3000);
 }
 $("btnJsonOut").onclick=saveJSON;

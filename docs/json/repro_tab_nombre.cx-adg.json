@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "app": "cx-adg",
+  "doc": {
+    "theme": "dark",
+    "cur": 0,
+    "pages": [
+      { "name": "Página 1", "nodes": [], "edges": [], "nextId": 1 },
+      { "name": "Página 2", "nodes": [], "edges": [], "nextId": 1 }
+    ]
+  },
+  "settings": {
+    "speed": 0.5,
+    "dots": 3,
+    "build": false,
+    "stagger": 0.45,
+    "grid": true
+  }
+}

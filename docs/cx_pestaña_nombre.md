@@ -68,7 +68,8 @@ Solo renombramos pestañas que siguen el patrón automático:
 
 ```js
 function isDefaultPageName(name) {
-  return /^Página \d+$/i.test(String(name || "").trim());
+  const s = String(name || "").replace(/\u00A0/g, " ").trim(); // NBSP -> espacio normal
+  return /^Página\s+\d+$/i.test(s);
 }
 ```
 
@@ -144,7 +145,11 @@ function applyProjectData(d, opts = {}) {
 }
 ```
 
-**Importante:** `applyPageNamesFromFile` solo se llama al **abrir desde disco**, no al restaurar autoguardado ni al crear una página nueva con «＋».
+**Importante:** `applyPageNamesFromFile` solo se llama al **abrir desde disco** (para renombrar pestañas existentes). Además, el app guarda en memoria el “base name” del archivo abierto (`currentFileBase`) para que:
+
+- Las páginas nuevas creadas con «＋» usen `archivo`, `archivo (2)`, etc.
+- Al guardar, se renombren automáticamente las páginas que sigan el patrón automático `Página X`.
+- Además, el archivo descargado respeta el nombre base: `${currentFileBase}.cx-adg.json`.
 
 ---
 
@@ -171,7 +176,7 @@ renderTabs() → pestaña muestra «dispersion-pagos»
 | Acción | Nombre de pestaña |
 |--------|-------------------|
 | Primera visita / app vacía | `Página 1` |
-| Botón «＋» nueva página | `Página 2`, `Página 3`, … |
+| Botón «＋» nueva página | Si abriste un archivo: `archivo (2)`, `archivo (3)`, …; si no: `Página 2`, `Página 3`, … |
 | Doble clic en pestaña | El usuario edita con `prompt()` |
 | Abrir archivo | Nombre del archivo (esta guía) |
 | Restaurar autoguardado | Nombres que ya tenía en sesión |
