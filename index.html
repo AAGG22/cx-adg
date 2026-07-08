@@ -471,12 +471,14 @@ function normalizePageName(s){
     .replace(/\u00A0/g," ")   // NBSP
     .replace(/\u202F/g," ")  // narrow no-break space
     .replace(/\u200B/g,"")   // zero-width space
+    .replace(/\s+/g," ")
     .trim();
 } // NBSP/espacios raros -> espacio normal
 function isDefaultPageName(name){
   const s=normalizePageName(name);
   const plain=s.normalize("NFD").replace(/[\u0300-\u036f]/g,""); // quita tildes
-  return /^pagina\s+\d+$/i.test(plain);
+  // Permite variaciones como: "Página 2", "Página\u00A02", "Pagina2", "Pagina  2"
+  return /^pagina\s*\d+$/i.test(plain);
 }
 function pageLabelFromBase(base, pageIndex){
   return pageIndex===0 ? base : `${base} (${pageIndex+1})`;
