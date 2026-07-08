@@ -99,6 +99,7 @@
   .swatches{display:flex; flex-wrap:wrap; gap:6px;}
   .swatch{width:24px; height:24px; border-radius:6px; border:2px solid transparent; cursor:pointer;}
   .swatch.sel{border-color:#fff;}
+  .swatch.outlineOnly{background:transparent; box-shadow:inset 0 0 0 2px #2e3134;}
   .alignBtns{display:flex; gap:4px;}
   .alignBtns button{width:32px; height:28px; padding:0; font-size:14px; line-height:1;}
   .alignBtns button.sel{border-color:var(--accent); color:var(--accent);}
@@ -401,6 +402,11 @@ const PALETTE=[
   {c:"#8f8f8f", n:"Externo"},
   {c:"#c9b458", n:"Config"},
 ];
+const OUTLINE_COLOR="outline";
+const OUTLINE_STROKE="#2e3134";
+const PALETTE_RECT=[{c:OUTLINE_COLOR, n:"Contorno gris", rectOnly:true}];
+function isOutlineColor(c){ return c===OUTLINE_COLOR; }
+function nodeRectOutline(n){ return n.shape==="rect" && isOutlineColor(n.color); }
 const THEMES={
   dark : {bg:"#161616", grid:"rgba(255,255,255,.045)", text:"#ededed", edge:"#777", edgeLbl:"#bdbdbd", lblBg:"#161616"},
   crema: {bg:"#f4eee1", grid:"rgba(0,0,0,.06)",        text:"#2b2620", edge:"#8a8275", edgeLbl:"#6b6457", lblBg:"#f4eee1"},
@@ -1008,6 +1014,13 @@ function drawNode(c,n,t,theme,isExport){
   }
   else if(n.shape==="text"){
     drawLabelLines(c,n,theme,22,n.y);
+  }
+  else if(nodeRectOutline(n)){
+    c.strokeStyle=OUTLINE_STROKE; c.lineWidth=2.5+glow*1.5;
+    if(glow>0){c.shadowColor=OUTLINE_STROKE; c.shadowBlur=18*glow;}
+    shapePath(c,n); c.stroke();
+    c.shadowBlur=0;
+    drawLabelLines(c,n,theme,17,n.y);
   }
   else{
     c.fillStyle=hexA(n.color, theme==="crema"?.16:.18);
@@ -1675,7 +1688,10 @@ function refreshPanel(){
     $("shapeSel").value=["image","icon"].includes(obj.shape)?"rect":obj.shape;
     $("pulseChk").checked=!!obj.pulse;
     $("orderIn").value=obj.order;
-    [...$("swatches").children].forEach(sw=>sw.classList.toggle("sel", sw.dataset.c===obj.color));
+    [...$("swatches").children].forEach(sw=>{
+      sw.classList.toggle("sel", sw.dataset.c===obj.color);
+      if(sw.dataset.rectOnly) sw.style.display=obj.shape==="rect"?"":"none";
+    });
   } else {
     $("routeSel").value=obj.route||"straight";
     $("fromSel").value=obj.fromSide||"";
@@ -1697,11 +1713,22 @@ PALETTE.forEach(p=>{
   const d=document.createElement("div");
   d.className="swatch"; d.style.background=p.c; d.title=p.n; d.dataset.c=p.c;
   d.onclick=()=>{
-    // aplica a todos los nodos seleccionados
     if(!selN.size) return;
     pushUndo();
     let any=false;
     selN.forEach(id=>{ const n=nodeById(id); if(n){ n.color=p.c; any=true; } });
+    if(any) refreshPanel();
+  };
+  $("swatches").appendChild(d);
+});
+PALETTE_RECT.forEach(p=>{
+  const d=document.createElement("div");
+  d.className="swatch outlineOnly"; d.title=p.n; d.dataset.c=p.c; d.dataset.rectOnly="1";
+  d.onclick=()=>{
+    if(!selN.size) return;
+    pushUndo();
+    let any=false;
+    selN.forEach(id=>{ const n=nodeById(id); if(n && n.shape==="rect"){ n.color=p.c; any=true; } });
     if(any) refreshPanel();
   };
   $("swatches").appendChild(d);
@@ -1773,7 +1800,7 @@ $("fsIn").addEventListener("input", ()=>{
     scheduleAutosave();
   }
 });
-$("shapeSel").onchange=()=>{ const n=singleNode(); if(n&&n.shape!=="image"&&n.shape!=="icon"){ pushUndo(); n.shape=$("shapeSel").value; scheduleAutosave(); } };
+$("shapeSel").onchange=()=>{ const n=singleNode(); if(n&&n.shape!=="image"&&n.shape!=="icon"){ pushUndo(); n.shape=$("shapeSel").value; if(n.shape!=="rect"&&isOutlineColor(n.color)) n.color=PALETTE[0].c; refreshPanel(); scheduleAutosave(); } };
 $("pulseChk").onchange=()=>{ const n=singleNode(); if(n){ pushUndo(); n.pulse=$("pulseChk").checked; scheduleAutosave(); } };
 $("orderIn").onchange=()=>{ const n=singleNode(); if(n){ pushUndo(); n.order=+$("orderIn").value||0; scheduleAutosave(); } };
 $("routeSel").onchange=()=>{ const e=singleEdge(); if(e){ pushUndo(); e.route=$("routeSel").value; scheduleAutosave(); } };
@@ -2060,7 +2087,9 @@ function renderImageToSVG(n){
   return `<image x="${(n.x-n.w/2).toFixed(2)}" y="${(n.y-n.h/2).toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(n.img)}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 function renderNodeToSVG(n, theme){
-  const fill=svgFillColor(n.color, theme), stroke=escapeAttribute(n.color);
+  const outline=nodeRectOutline(n);
+  const fill=outline?"none":svgFillColor(n.color, theme);
+  const stroke=outline?OUTLINE_STROKE:escapeAttribute(n.color);
   const parts=[`<g id="node-${n.id}">`];
   switch(n.shape){
     case "circle":
