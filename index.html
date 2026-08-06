@@ -2202,7 +2202,7 @@ function syncExportRows(){
   $("exRowDur").style.display = f==="gif" ? "flex":"none";
   $("exHint").style.display = (f==="gif"||f==="svg") ? "block":"none";
   if(f==="svg") $("exHint").textContent="SVG exporta el área 2560×1440. Con fondo transparente no se incluyen el color de fondo, la cuadrícula ni el marco punteado.";
-  else if(f==="gif") $("exHint").textContent="El loop de flujo se ajusta solo para que el GIF sea cíclico. La transparencia en GIF es de bordes duros (limitación del formato); para bordes suaves usa PNG.";
+  else if(f==="gif") $("exHint").textContent="El loop de flujo se ajusta solo para que el GIF sea cíclico. Frames con disposal «leave as is» (sin flash negro). La transparencia GIF es de 1 bit (bordes duros); para alpha suave usá PNG o WebP/APNG.";
 }
 $("exFmt").onchange=syncExportRows;
 $("btnExport").onclick=()=>{ exModal.style.display="flex"; syncExportRows(); };
@@ -2269,7 +2269,8 @@ async function exportGIF(scale, transparent){
       oc.save(); oc.scale(scale,scale); oc.translate(-b.x, -b.y);
       render(oc,t, transparent? {export:true, bg:keyCss, bounds:b} : {export:true, bounds:b});
       oc.restore();
-      gif.addFrame(off,{copy:true, delay:Math.round(1000/fps)});
+      // dispose:1 = leave as is (evita flash negro de disposal 2 / restore to background)
+      gif.addFrame(off,{copy:true, delay:Math.round(1000/fps), dispose:1});
       if(f%5===0){ fill.style.width=(f/frames*40)+"%"; await new Promise(r=>setTimeout(r)); }
     }
     settings.speed=realSpeed;

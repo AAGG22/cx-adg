@@ -1,4 +1,4 @@
-const CACHE = "cx-adg-static-v8";
+const CACHE = "cx-adg-static-v9";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./sw.js"];
 const GIF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/";
 const CDN_ASSETS = [
