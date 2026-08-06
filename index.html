@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>cx-adg — diagramas CX</title>
-<meta name="description" content="Crea diagramas animados de arquitectura y exporta GIF, PNG o JPG directo desde el navegador. Gratis, sin cuenta, sin backend.">
+<meta name="description" content="Crea diagramas animados de arquitectura y exporta APNG, GIF, PNG, JPG o SVG directo desde el navegador. Gratis, sin cuenta, sin backend.">
 <meta property="og:title" content="cx-adg — diagramas CX">
-<meta property="og:description" content="Diagramas animados de arquitectura con export a GIF, PNG y JPG. Gratis y directo en tu navegador.">
+<meta property="og:description" content="Diagramas animados de arquitectura con export a APNG, GIF, PNG, JPG y SVG. Gratis y directo en tu navegador.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161616'/%3E%3Ccircle cx='18' cy='32' r='7' fill='%23d08b5b'/%3E%3Ccircle cx='40' cy='32' r='5' fill='%23d08b5b' opacity='.65'/%3E%3Ccircle cx='54' cy='32' r='3.4' fill='%23d08b5b' opacity='.35'/%3E%3C/svg%3E">
 <link rel="manifest" href="./manifest.webmanifest">
@@ -342,6 +342,7 @@
     <h2>Exportar página actual</h2>
     <div class="row"><label>Formato</label>
       <select id="exFmt">
+        <option value="apng">APNG animado (alpha limpio)</option>
         <option value="gif">GIF animado</option>
         <option value="png">PNG</option>
         <option value="jpg">JPG</option>
@@ -361,7 +362,7 @@
       <select id="exFps"><option>15</option><option selected>20</option><option>25</option></select>
     </div>
     <div class="row" id="exRowDur"><label>Duración (s)</label><input type="number" id="exDur" min="1" max="15" step="0.5" value="3"></div>
-    <p class="hint" id="exHint">El loop de flujo se ajusta solo para que el GIF sea cíclico. La transparencia en GIF es de bordes duros (limitación del formato); para bordes suaves usa PNG.</p>
+    <p class="hint" id="exHint">APNG usa transparencia real (sin parpadeo negro). GIF es más compatible pero la transparencia GIF es de 1 bit y puede parpadear.</p>
     <div class="actions">
       <button id="exCancel">Cancelar</button>
       <button id="exGo" class="primary">Exportar</button>
@@ -372,7 +373,7 @@
 <!-- Progress overlay -->
 <div class="overlay" id="progOv">
   <div class="card" style="text-align:center;">
-    <h2>Generando GIF…</h2>
+    <h2 id="ovTitle">Generando animación…</h2>
     <div class="hint" id="ovMsg">Renderizando fotogramas</div>
     <div id="bar"><div id="barFill"></div></div>
   </div>
@@ -1159,7 +1160,7 @@ function render(c,t,opts={}){
     c.clearRect(b.x, b.y, b.w, b.h);
     if(opts.bg){ c.fillStyle=opts.bg; c.fillRect(b.x, b.y, b.w, b.h); }
     else if(!opts.transparent){ c.fillStyle=T.bg; c.fillRect(b.x, b.y, b.w, b.h); }
-    if(settings.grid){
+    if(settings.grid && !opts.transparent){
       c.strokeStyle=T.grid; c.lineWidth=1; c.beginPath();
       const startX = Math.floor(b.x/GRID)*GRID;
       const startY = Math.floor(b.y/GRID)*GRID;
@@ -2197,12 +2198,14 @@ function exportSVG(scale=1, transparent=false){
 const exModal=$("exModal");
 function syncExportRows(){
   const f=$("exFmt").value;
-  $("exRowTr").style.display = (f==="png"||f==="gif"||f==="svg") ? "flex":"none";
-  $("exRowFps").style.display = f==="gif" ? "flex":"none";
-  $("exRowDur").style.display = f==="gif" ? "flex":"none";
-  $("exHint").style.display = (f==="gif"||f==="svg") ? "block":"none";
+  const anim=f==="gif"||f==="apng";
+  $("exRowTr").style.display = (f==="png"||f==="gif"||f==="apng"||f==="svg") ? "flex":"none";
+  $("exRowFps").style.display = anim ? "flex":"none";
+  $("exRowDur").style.display = anim ? "flex":"none";
+  $("exHint").style.display = (anim||f==="svg") ? "block":"none";
   if(f==="svg") $("exHint").textContent="SVG exporta el área 2560×1440. Con fondo transparente no se incluyen el color de fondo, la cuadrícula ni el marco punteado.";
-  else if(f==="gif") $("exHint").textContent="El loop de flujo se ajusta solo para que el GIF sea cíclico. Frames con disposal «leave as is» (sin flash negro). La transparencia GIF es de 1 bit (bordes duros); para alpha suave usá PNG o WebP/APNG.";
+  else if(f==="apng") $("exHint").textContent="APNG = PNG animado con alpha real (sin flash negro). Archivo .png; Chrome, Firefox, Safari lo reproducen. Ideal con fondo transparente.";
+  else if(f==="gif") $("exHint").textContent="GIF: muy compatible. Si marcás fondo transparente, se exporta como APNG (alpha limpio) porque el GIF no puede hacerlo sin parpadeo. GIF opaco sigue siendo .gif.";
 }
 $("exFmt").onchange=syncExportRows;
 $("btnExport").onclick=()=>{ exModal.style.display="flex"; syncExportRows(); };
@@ -2211,11 +2214,15 @@ function slug(){ return (P().name||"diagrama").toLowerCase().replace(/[^a-z0-9á
 
 $("exGo").onclick=()=>{
   const fmt=$("exFmt").value, scale=+$("exRes").value;
+  const transparent=$("exTr").checked;
   exModal.style.display="none";
   if(P().nodes.length===0){ alert("La página está vacía."); return; }
-  if(fmt==="gif") exportGIF(scale, $("exTr").checked);
-  else if(fmt==="svg") exportSVG(scale, $("exTr").checked);
-  else exportStatic(fmt, scale, $("exTr").checked);
+  // GIF + transparencia → APNG (alpha limpio, sin disposal flash)
+  if(fmt==="apng") exportAPNG(scale, transparent);
+  else if(fmt==="gif" && transparent) exportAPNG(scale, true);
+  else if(fmt==="gif") exportGIF(scale, false);
+  else if(fmt==="svg") exportSVG(scale, transparent);
+  else exportStatic(fmt, scale, transparent);
 };
 function exportStatic(fmt,scale,transparent){
   const b = getBounds();
@@ -2234,6 +2241,75 @@ function exportStatic(fmt,scale,transparent){
     setTimeout(()=>URL.revokeObjectURL(a.href),3000);
   }, mime, .92);
 }
+function loadScriptOnce(src, globalCheck){
+  if(globalCheck()) return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement("script");
+    s.src=src; s.async=true;
+    s.onload=()=>resolve();
+    s.onerror=()=>reject(new Error("No se pudo cargar "+src));
+    document.head.appendChild(s);
+  });
+}
+async function ensureUPNG(){
+  if(window.UPNG) return;
+  await loadScriptOnce("https://cdn.jsdelivr.net/npm/pako@1.0.11/dist/pako.min.js", ()=>!!window.pako);
+  await loadScriptOnce("https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.js", ()=>!!window.UPNG);
+}
+function animExportTiming(){
+  const fps=+$("exFps").value;
+  let dur=clamp(+$("exDur").value||3,1,15);
+  const bDur=buildDuration();
+  const flowDur=Math.max(0.5,dur-bDur);
+  const cycles=Math.max(1,Math.round(settings.speed*flowDur));
+  const exSpeed=cycles/flowDur;
+  return { fps, dur, exSpeed, frames:Math.round(dur*fps), delay:Math.round(1000/fps) };
+}
+async function exportAPNG(scale, transparent){
+  const { fps, dur, exSpeed, frames, delay }=animExportTiming();
+  const realSpeed=settings.speed;
+  const ov=$("progOv"), fill=$("barFill"), msg=$("ovMsg");
+  $("ovTitle").textContent="Generando APNG…";
+  ov.style.display="flex"; fill.style.width="0%"; msg.textContent="Cargando encoder…";
+  try{
+    await ensureUPNG();
+    const b=getBounds();
+    const w=Math.round(b.w*scale), h=Math.round(b.h*scale);
+    const off=document.createElement("canvas"); off.width=w; off.height=h;
+    const oc=off.getContext("2d",{willReadFrequently:true});
+    const bufs=[], dels=[];
+    settings.speed=exSpeed;
+    msg.textContent="Renderizando fotogramas…";
+    for(let f=0;f<frames;f++){
+      const t=f/fps;
+      if(transparent) oc.clearRect(0,0,w,h);
+      oc.save(); oc.scale(scale,scale); oc.translate(-b.x, -b.y);
+      render(oc,t,{export:true, transparent:!!transparent, bounds:b});
+      oc.restore();
+      bufs.push(oc.getImageData(0,0,w,h).data.slice().buffer);
+      dels.push(delay);
+      if(f%3===0){ fill.style.width=(f/frames*55)+"%"; await new Promise(r=>setTimeout(r)); }
+    }
+    settings.speed=realSpeed;
+    msg.textContent="Codificando APNG (alpha)…";
+    fill.style.width="60%";
+    await new Promise(r=>setTimeout(r));
+    // cnum 0 = lossless RGBA (alpha limpio)
+    const png=UPNG.encode(bufs,w,h,0,dels);
+    fill.style.width="100%";
+    const blob=new Blob([png],{type:"image/png"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=slug()+".png";
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+    ov.style.display="none";
+  }catch(err){
+    settings.speed=realSpeed;
+    ov.style.display="none";
+    alert("No se pudo generar el APNG: "+err.message);
+  }
+}
 let workerUrl=null;
 async function getWorker(){
   if(workerUrl) return workerUrl;
@@ -2242,14 +2318,12 @@ async function getWorker(){
   return workerUrl;
 }
 async function exportGIF(scale, transparent){
-  const fps=+$("exFps").value;
-  let dur=clamp(+$("exDur").value||3,1,15);
-  const bDur=buildDuration();
-  const flowDur=Math.max(0.5,dur-bDur);
-  const cycles=Math.max(1,Math.round(settings.speed*flowDur));
-  const exSpeed=cycles/flowDur, realSpeed=settings.speed;
+  // transparent GIF redirige a APNG desde exGo; aquí solo opaco
+  const { fps, dur, exSpeed, frames, delay }=animExportTiming();
+  const realSpeed=settings.speed;
 
   const ov=$("progOv"), fill=$("barFill"), msg=$("ovMsg");
+  $("ovTitle").textContent="Generando GIF…";
   ov.style.display="flex"; fill.style.width="0%"; msg.textContent="Renderizando fotogramas…";
   try{
     const wurl=await getWorker();
@@ -2257,20 +2331,15 @@ async function exportGIF(scale, transparent){
     const w=Math.round(b.w*scale), h=Math.round(b.h*scale);
     const off=document.createElement("canvas"); off.width=w; off.height=h;
     const oc=off.getContext("2d");
-    const keyNum = doc.theme==="crema"? 0xfefdfc : 0x010101;
-    const keyCss = doc.theme==="crema"? "#fefdfc" : "#010101";
     const gifOpts={workers:2, quality:8, width:w, height:h, workerScript:wurl};
-    if(transparent) gifOpts.transparent=keyNum;
     const gif=new GIF(gifOpts);
-    const frames=Math.round(dur*fps);
     settings.speed=exSpeed;
     for(let f=0;f<frames;f++){
       const t=f/fps;
       oc.save(); oc.scale(scale,scale); oc.translate(-b.x, -b.y);
-      render(oc,t, transparent? {export:true, bg:keyCss, bounds:b} : {export:true, bounds:b});
+      render(oc,t,{export:true, bounds:b});
       oc.restore();
-      // dispose:1 = leave as is (evita flash negro de disposal 2 / restore to background)
-      gif.addFrame(off,{copy:true, delay:Math.round(1000/fps), dispose:1});
+      gif.addFrame(off,{copy:true, delay, dispose:1});
       if(f%5===0){ fill.style.width=(f/frames*40)+"%"; await new Promise(r=>setTimeout(r)); }
     }
     settings.speed=realSpeed;
