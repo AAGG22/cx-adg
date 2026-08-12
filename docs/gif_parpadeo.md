@@ -49,10 +49,11 @@ No hay disposal 2 ni color clave. Por eso no hay flash negro.
 
 | Modo | Resultado |
 |------|-----------|
-| GIF **opaco** | Sigue disponible; frames con `dispose: 1` |
-| GIF + **transparente** | Se exporta como **APNG** (no se genera GIF transparente) |
+| GIF **opaco** | `.gif` con `dispose: 1` |
+| GIF + **transparente** | `.gif` con color clave (1 bit); puede parpadear — para alpha limpio usá APNG |
+| **No repetir animación** | Checkbox en el modal: GIF `repeat: 1`, APNG `num_plays: 1` |
 
-Intentar “arreglar” el GIF transparente solo con disposal no da alpha limpio. Por eso se abandonó ese camino para el caso transparente.
+GIF y APNG son formatos distintos en el selector; el GIF ya no se redirige a APNG.
 
 ---
 
@@ -69,27 +70,24 @@ Intentar “arreglar” el GIF transparente solo con disposal no da alpha limpio
 
 ## 6. Código clave
 
-Export modal: opción `apng`. Si `gif` + transparente → `exportAPNG`.
+Export modal: opciones `gif` y `apng` independientes. Checkbox `#exOnce` → no repetir.
 
 ```js
-if (fmt === "apng") exportAPNG(scale, transparent);
-else if (fmt === "gif" && transparent) exportAPNG(scale, true);
-else if (fmt === "gif") exportGIF(scale, false);
+if (fmt === "apng") exportAPNG(scale, transparent, playOnce);
+else if (fmt === "gif") exportGIF(scale, transparent, playOnce);
 ```
 
-Render transparente (sin relleno de tema ni grilla):
+GIF con loop:
 
 ```js
-c.clearRect(...);
-// no fill de T.bg si opts.transparent
-// grilla omitida si opts.transparent
+const gifOpts = { repeat: playOnce ? 1 : 0, /* ... */ };
 ```
 
-Encoder:
+APNG (UPNG fija `num_plays: 0`; si hay que no repetir, se parchea `acTL`):
 
 ```js
-await ensureUPNG(); // pako + UPNG desde jsDelivr
-const png = UPNG.encode(bufs, w, h, 0, dels); // 0 = lossless RGBA
+let png = UPNG.encode(bufs, w, h, 0, dels);
+if (playOnce) png = setApngNumPlays(png, 1);
 ```
 
 ---

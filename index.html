@@ -361,8 +361,9 @@
     <div class="row" id="exRowFps"><label>FPS</label>
       <select id="exFps"><option>15</option><option selected>20</option><option>25</option></select>
     </div>
-    <div class="row" id="exRowDur"><label>Duración (s)</label><input type="number" id="exDur" min="1" max="15" step="0.5" value="3"></div>
-    <p class="hint" id="exHint">APNG usa transparencia real (sin parpadeo negro). GIF es más compatible pero la transparencia GIF es de 1 bit y puede parpadear.</p>
+    <div class="row" id="exRowDur"><label>Duración (s)</label><input type="number" id="exDur" min="1" max="30" step="0.5" value="3"></div>
+    <div class="row" id="exRowOnce"><label>No repetir animación</label><input type="checkbox" id="exOnce"></div>
+    <p class="hint" id="exHint">APNG usa transparencia real (sin parpadeo negro). GIF es más compatible; su transparencia es de 1 bit.</p>
     <div class="actions">
       <button id="exCancel">Cancelar</button>
       <button id="exGo" class="primary">Exportar</button>
@@ -935,6 +936,23 @@ function buildDuration(){
   if(!settings.build || !P().nodes.length) return 0;
   const maxO=P().nodes.reduce((m,n)=>Math.max(m,n.order),0);
   return maxO*settings.stagger + 0.8;
+}
+/** Segundos de un ciclo completo de puntos de flujo (a la velocidad actual). */
+function flowCycleDuration(){
+  return 1/Math.max(0.2, settings.speed||0.5);
+}
+/**
+ * Duración de export que cubre la animación sin cortar:
+ * aparición (si está activa) + 1 ciclo completo de flujo.
+ */
+function suggestedExportDuration(){
+  const raw=buildDuration()+flowCycleDuration();
+  return clamp(Math.ceil(raw*2)/2, 1, 30);
+}
+function exportDurationExplain(){
+  const b=buildDuration(), c=flowCycleDuration(), s=suggestedExportDuration();
+  if(b>0) return `Sugerido ${s}s = aparición (~${b.toFixed(1)}s) + 1 ciclo de flujo (~${c.toFixed(1)}s). Menos segundos recorta el final.`;
+  return `Sugerido ${s}s = 1 ciclo completo de flujo (~${c.toFixed(1)}s). Menos segundos recorta el final.`;
 }
 function roundRect(c,x,y,w,h,r){
   c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
@@ -2202,25 +2220,30 @@ function syncExportRows(){
   $("exRowTr").style.display = (f==="png"||f==="gif"||f==="apng"||f==="svg") ? "flex":"none";
   $("exRowFps").style.display = anim ? "flex":"none";
   $("exRowDur").style.display = anim ? "flex":"none";
+  $("exRowOnce").style.display = anim ? "flex":"none";
   $("exHint").style.display = (anim||f==="svg") ? "block":"none";
   if(f==="svg") $("exHint").textContent="SVG exporta el área 2560×1440. Con fondo transparente no se incluyen el color de fondo, la cuadrícula ni el marco punteado.";
-  else if(f==="apng") $("exHint").textContent="APNG = PNG animado con alpha real (sin flash negro). Archivo .png; Chrome, Firefox, Safari lo reproducen. Ideal con fondo transparente.";
-  else if(f==="gif") $("exHint").textContent="GIF: muy compatible. Si marcás fondo transparente, se exporta como APNG (alpha limpio) porque el GIF no puede hacerlo sin parpadeo. GIF opaco sigue siendo .gif.";
+  else if(f==="apng") $("exHint").textContent="APNG = PNG animado con alpha real (sin flash negro). "+exportDurationExplain()+" «No repetir» = una sola pasada.";
+  else if(f==="gif") $("exHint").textContent="GIF clásico (.gif). "+exportDurationExplain()+" Transparencia GIF es de 1 bit (para alpha limpio usá APNG).";
 }
 $("exFmt").onchange=syncExportRows;
-$("btnExport").onclick=()=>{ exModal.style.display="flex"; syncExportRows(); };
+$("btnExport").onclick=()=>{
+  // Prefijar duración completa de la animación actual; el usuario puede bajarla
+  $("exDur").value=suggestedExportDuration();
+  exModal.style.display="flex";
+  syncExportRows();
+};
 $("exCancel").onclick=()=>exModal.style.display="none";
 function slug(){ return (P().name||"diagrama").toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi,"-"); }
 
 $("exGo").onclick=()=>{
   const fmt=$("exFmt").value, scale=+$("exRes").value;
   const transparent=$("exTr").checked;
+  const playOnce=$("exOnce").checked;
   exModal.style.display="none";
   if(P().nodes.length===0){ alert("La página está vacía."); return; }
-  // GIF + transparencia → APNG (alpha limpio, sin disposal flash)
-  if(fmt==="apng") exportAPNG(scale, transparent);
-  else if(fmt==="gif" && transparent) exportAPNG(scale, true);
-  else if(fmt==="gif") exportGIF(scale, false);
+  if(fmt==="apng") exportAPNG(scale, transparent, playOnce);
+  else if(fmt==="gif") exportGIF(scale, transparent, playOnce);
   else if(fmt==="svg") exportSVG(scale, transparent);
   else exportStatic(fmt, scale, transparent);
 };
@@ -2255,21 +2278,40 @@ async function ensureUPNG(){
   if(window.UPNG) return;
   await loadScriptOnce("https://cdn.jsdelivr.net/npm/pako@1.0.11/dist/pako.min.js", ()=>!!window.pako);
   await loadScriptOnce("https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.js", ()=>!!window.UPNG);
+  if(!window.UPNG) throw new Error("UPNG no disponible");
 }
 function animExportTiming(){
   const fps=+$("exFps").value;
-  let dur=clamp(+$("exDur").value||3,1,15);
+  let dur=clamp(+$("exDur").value||suggestedExportDuration(),1,30);
   const bDur=buildDuration();
   const flowDur=Math.max(0.5,dur-bDur);
   const cycles=Math.max(1,Math.round(settings.speed*flowDur));
   const exSpeed=cycles/flowDur;
   return { fps, dur, exSpeed, frames:Math.round(dur*fps), delay:Math.round(1000/fps) };
 }
-async function exportAPNG(scale, transparent){
-  const { fps, dur, exSpeed, frames, delay }=animExportTiming();
+function setProgTitle(text){
+  const el=$("ovTitle");
+  if(el) el.textContent=text;
+}
+/** APNG: num_plays 0=infinito, 1=una vez. UPNG fija 0; parcheamos acTL + CRC. */
+function setApngNumPlays(pngBuf, numPlays){
+  const data=new Uint8Array(pngBuf);
+  for(let i=8;i<data.length-16;i++){
+    if(data[i]===0x61&&data[i+1]===0x63&&data[i+2]===0x54&&data[i+3]===0x4c){
+      const dv=new DataView(data.buffer, data.byteOffset, data.byteLength);
+      dv.setUint32(i+8, numPlays>>>0);
+      const crc=UPNG.crc.crc(data, i, 12);
+      dv.setUint32(i+12, crc>>>0);
+      return data.buffer.slice(data.byteOffset, data.byteOffset+data.byteLength);
+    }
+  }
+  return pngBuf;
+}
+async function exportAPNG(scale, transparent, playOnce){
+  const { fps, exSpeed, frames, delay }=animExportTiming();
   const realSpeed=settings.speed;
   const ov=$("progOv"), fill=$("barFill"), msg=$("ovMsg");
-  $("ovTitle").textContent="Generando APNG…";
+  setProgTitle("Generando APNG…");
   ov.style.display="flex"; fill.style.width="0%"; msg.textContent="Cargando encoder…";
   try{
     await ensureUPNG();
@@ -2286,7 +2328,8 @@ async function exportAPNG(scale, transparent){
       oc.save(); oc.scale(scale,scale); oc.translate(-b.x, -b.y);
       render(oc,t,{export:true, transparent:!!transparent, bounds:b});
       oc.restore();
-      bufs.push(oc.getImageData(0,0,w,h).data.slice().buffer);
+      const rgba=oc.getImageData(0,0,w,h).data;
+      bufs.push(rgba.buffer.slice(rgba.byteOffset, rgba.byteOffset+rgba.byteLength));
       dels.push(delay);
       if(f%3===0){ fill.style.width=(f/frames*55)+"%"; await new Promise(r=>setTimeout(r)); }
     }
@@ -2294,8 +2337,8 @@ async function exportAPNG(scale, transparent){
     msg.textContent="Codificando APNG (alpha)…";
     fill.style.width="60%";
     await new Promise(r=>setTimeout(r));
-    // cnum 0 = lossless RGBA (alpha limpio)
-    const png=UPNG.encode(bufs,w,h,0,dels);
+    let png=UPNG.encode(bufs,w,h,0,dels);
+    if(playOnce) png=setApngNumPlays(png, 1);
     fill.style.width="100%";
     const blob=new Blob([png],{type:"image/png"});
     const a=document.createElement("a");
@@ -2317,29 +2360,42 @@ async function getWorker(){
   workerUrl=URL.createObjectURL(new Blob([src],{type:"application/javascript"}));
   return workerUrl;
 }
-async function exportGIF(scale, transparent){
-  // transparent GIF redirige a APNG desde exGo; aquí solo opaco
-  const { fps, dur, exSpeed, frames, delay }=animExportTiming();
+async function exportGIF(scale, transparent, playOnce){
+  const { fps, exSpeed, frames, delay }=animExportTiming();
   const realSpeed=settings.speed;
 
   const ov=$("progOv"), fill=$("barFill"), msg=$("ovMsg");
-  $("ovTitle").textContent="Generando GIF…";
+  setProgTitle("Generando GIF…");
   ov.style.display="flex"; fill.style.width="0%"; msg.textContent="Renderizando fotogramas…";
   try{
+    if(typeof GIF!=="function") throw new Error("gif.js no está cargado");
     const wurl=await getWorker();
     const b = getBounds();
     const w=Math.round(b.w*scale), h=Math.round(b.h*scale);
+    if(w<1||h<1) throw new Error("Área de exportación inválida");
     const off=document.createElement("canvas"); off.width=w; off.height=h;
     const oc=off.getContext("2d");
-    const gifOpts={workers:2, quality:8, width:w, height:h, workerScript:wurl};
+    // repeat: 0=loop infinito; 1=una pasada (extensión Netscape; más fiable que -1 en Chrome)
+    const gifOpts={
+      workers:2, quality:8, width:w, height:h, workerScript:wurl,
+      repeat: playOnce ? 1 : 0
+    };
+    const keyNum = doc.theme==="crema"? 0xfefdfc : 0x010101;
+    const keyCss = doc.theme==="crema"? "#fefdfc" : "#010101";
+    if(transparent) gifOpts.transparent=keyNum;
     const gif=new GIF(gifOpts);
     settings.speed=exSpeed;
     for(let f=0;f<frames;f++){
       const t=f/fps;
       oc.save(); oc.scale(scale,scale); oc.translate(-b.x, -b.y);
-      render(oc,t,{export:true, bounds:b});
+      render(oc,t, transparent
+        ? {export:true, bg:keyCss, bounds:b}
+        : {export:true, bounds:b});
       oc.restore();
-      gif.addFrame(off,{copy:true, delay, dispose:1});
+      // opaco: dispose 1 evita flash; con transparencia dejar default del encoder
+      const frameOpts={copy:true, delay:Math.max(20, delay)};
+      if(!transparent) frameOpts.dispose=1;
+      gif.addFrame(off, frameOpts);
       if(f%5===0){ fill.style.width=(f/frames*40)+"%"; await new Promise(r=>setTimeout(r)); }
     }
     settings.speed=realSpeed;
