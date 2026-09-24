@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 650" width="100%" height="100%">
+  <defs>
+    <!-- Degradado para darle volumen cilíndrico a la torre -->
+    <linearGradient id="towerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e0e0e0" />
+      <stop offset="30%" stop-color="#ffffff" />
+      <stop offset="70%" stop-color="#f5f5f5" />
+      <stop offset="100%" stop-color="#cccccc" />
+    </linearGradient>
+
+    <!-- Degradado para la góndola del motor (perspectiva 3D) -->
+    <linearGradient id="nacelleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="40%" stop-color="#e6e6e6" />
+      <stop offset="80%" stop-color="#b8b8b8" />
+      <stop offset="100%" stop-color="#999999" />
+    </linearGradient>
+
+    <!-- Sombra suave para las aspas traseras -->
+    <linearGradient id="bladeShadow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#d1d1d1" />
+    </linearGradient>
+  </defs>
+
+  <!-- TORRE CÓNICA (Base ancha, se afina arriba) -->
+  <polygon points="183,230 197,230 206,620 178,620" fill="url(#towerGrad)" />
+  
+  <!-- Base de apoyo inferior -->
+  <path d="M 178 620 Q 192 623 206 620 L 205 623 Q 192 626 179 623 Z" fill="#b3b3b3" />
+
+  <!-- ASPA INFERIOR DERECHA (Pasa por detrás del buje, apuntando hacia abajo) -->
+  <path d="M 188 235 
+           C 192 260, 210 320, 245 400
+           C 265 440, 276 460, 269 455
+           C 255 440, 220 340, 192 255
+           C 188 245, 187 238, 188 235 Z" 
+        fill="url(#bladeShadow)" opacity="0.9" />
+
+  <!-- GÓNDOLA DEL MOTOR (Cuerpo alargado horizontal hacia la derecha) -->
+  <path d="M 175 220 
+           C 175 210, 195 210, 215 215 
+           C 225 218, 230 223, 230 228
+           C 230 233, 220 238, 205 238
+           C 185 238, 175 230, 175 220 Z" 
+        fill="url(#nacelleGrad)" />
+
+  <!-- ROTOR / BUJE CENTRAL (Pieza redondeada frontal donde conectan las aspas) -->
+  <path d="M 170 216 
+           C 165 216, 155 220, 155 226 
+           C 155 232, 165 235, 172 235
+           C 178 235, 183 230, 182 225
+           C 182 220, 176 216, 170 216 Z" 
+        fill="#e6e6e6" stroke="#d4d4d4" stroke-width="0.5" />
+
+  <!-- ASPA SUPERIOR (Larga, fina y apuntando diagonalmente hacia arriba a la derecha) -->
+  <path d="M 172 217 
+           C 175 190, 200 120, 240 50
+           C 250 30, 255 20, 252 23
+           C 240 40, 205 130, 178 205
+           C 175 212, 173 215, 172 217 Z" 
+        fill="#ffffff" stroke="#e0e0e0" stroke-width="0.5" />
+
+  <!-- ASPA IZQUIERDA (Horizontal, plana y con la torsión aerodinámica marcada) -->
+  <path d="M 160 227
+           C 140 228, 90 230, 25 230
+           C 15 230, 20 224, 35 222
+           C 70 218, 130 215, 158 220
+           C 161 222, 161 225, 160 227 Z" 
+        fill="#f7f7f7" stroke="#e0e0e0" stroke-width="0.5" />
+
+</svg>

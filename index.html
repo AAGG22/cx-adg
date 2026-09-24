@@ -198,7 +198,7 @@
   <button id="btnJsonOut" title="Guardar archivo .cx-adg.json (Ctrl+S)">💾 Guardar</button>
   <button id="btnJsonIn" title="Abrir archivo guardado">📂 Abrir</button>
   <input type="file" id="fileIn" accept=".json,.cx-adg" style="display:none">
-  <input type="file" id="imgIn" accept="image/*" style="display:none">
+  <input type="file" id="imgIn" accept="image/*,.svg,image/svg+xml" style="display:none">
   <button id="btnExport" class="primary">⬇ Exportar</button>
 </header>
 
@@ -276,6 +276,10 @@
         <div class="row" id="rowTextColor" style="flex-direction:column; align-items:stretch;">
           <label>Color del texto</label>
           <div class="swatches" id="textSw"></div>
+        </div>
+        <div class="row" id="rowImgStroke" style="flex-direction:column; align-items:stretch; display:none;">
+          <label>Color de contorno (SVG)</label>
+          <div class="swatches" id="imgStrokeSw"></div>
         </div>
         <div class="row" id="rowFont"><label>Fuente</label>
           <select id="fontSel"></select>
@@ -465,6 +469,120 @@ function getImg(src){
   if(!imgCache[src]){ const im=new Image(); im.src=src; imgCache[src]=im; }
   return imgCache[src];
 }
+/* SVGs de la carpeta ./svg (listar acá cada archivo nuevo) */
+const CUSTOM_SVGS=[
+  {id:"turbina2", path:"./svg/turbina2.svg", n:"Turbina 2"},
+  {id:"turbina3", path:"./svg/turbina3.svg", n:"Turbina 3"},
+  {id:"bateria1", path:"./svg/bateria1.svg", n:"Batería"},
+];
+function fixSvgXmlns(text){
+  // Typo frecuente que impide renderizar el archivo como SVG
+  return String(text||"").replace(/xmlns=(["'])https?:\/\/w3\.org\1/gi,'xmlns="http://www.w3.org/2000/svg"');
+}
+function isSvgDataUrl(url){
+  return typeof url==="string" && /^data:image\/svg\+xml/i.test(url);
+}
+function decodeSvgDataUrl(url){
+  const comma=url.indexOf(",");
+  if(comma<0) return "";
+  const meta=url.slice(0,comma), payload=url.slice(comma+1);
+  if(/;base64/i.test(meta)){
+    const bin=atob(payload);
+    try{ return new TextDecoder("utf-8").decode(Uint8Array.from(bin,c=>c.charCodeAt(0))); }
+    catch(e){ return bin; }
+  }
+  try{ return decodeURIComponent(payload); }catch(e){ return payload; }
+}
+function expandHexColor(hex){
+  let h=String(hex||"").replace(/^#/,"");
+  if(h.length===3) h=h.split("").map(c=>c+c).join("");
+  if(h.length===8) h=h.slice(0,6); // ignore alpha
+  return h.length===6 ? h.toLowerCase() : null;
+}
+/** ¿Es un fill oscuro típico de contorno/line-art? (no toca colores vivos) */
+function isOutlineFillHex(hex){
+  const h=expandHexColor(hex);
+  if(!h) return false;
+  const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+  const lum=(0.299*r+0.587*g+0.114*b)/255;
+  const max=Math.max(r,g,b), min=Math.min(r,g,b);
+  const sat=max===0?0:(max-min)/max;
+  // oscuro y poco saturado (gris/negro) o casi negro
+  return lum<0.38 && (sat<0.45 || lum<0.18);
+}
+/**
+ * Recolorea el contorno del SVG:
+ * - strokes (líneas)
+ * - fills oscuros de line-art (p. ej. SVG Repo: #outline con fill #222)
+ * No altera fills de color (rojo, verde, etc.).
+ */
+function applySvgStrokeColor(svgText, color){
+  if(!color) return svgText;
+  let t=String(svgText||"");
+  // Quitar tint previo
+  t=t.replace(/<style[^>]*\bid=["']cx-outline-tint["'][^>]*>[\s\S]*?<\/style>/gi,"");
+
+  // CSS: stroke: #xxx / rgb(...)
+  t=t.replace(/stroke\s*:\s*#[0-9a-fA-F]{3,8}\b/g, `stroke:${color}`);
+  t=t.replace(/stroke\s*:\s*rgb\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*\)/gi, `stroke:${color}`);
+  t=t.replace(/stroke\s*:\s*rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*\)/gi, `stroke:${color}`);
+  // CSS: fill oscuro de contorno
+  t=t.replace(/fill\s*:\s*(#[0-9a-fA-F]{3,8})\b/gi, (m, hex)=> isOutlineFillHex(hex) ? `fill:${color}` : m);
+  t=t.replace(/fill\s*:\s*#000\b/gi, `fill:${color}`);
+  t=t.replace(/fill\s*:\s*black\b/gi, `fill:${color}`);
+
+  // Atributos stroke="..."
+  t=t.replace(/\bstroke=(["'])(?!none\1)[^"']*\1/gi, `stroke="${color}"`);
+  // Atributos fill="#oscuro"
+  t=t.replace(/\bfill=(["'])(#[0-9a-fA-F]{3,8})\1/gi, (m, q, hex)=> isOutlineFillHex(hex) ? `fill="${color}"` : m);
+  t=t.replace(/\bfill=(["'])black\1/gi, `fill="${color}"`);
+
+  // Estilo embebido: fuerza contorno en grupo #outline (SVG Repo) y strokes visibles
+  const tintCss=`<style id="cx-outline-tint">
+#outline path,#outline polygon,#outline circle,#outline ellipse,#outline rect,#outline polyline{fill:${color}!important;stroke:${color}!important}
+[stroke]:not([stroke="none"]){stroke:${color}!important}
+</style>`;
+  if(/<svg\b[^>]*>/i.test(t)) t=t.replace(/<svg\b[^>]*>/i, m=>m+tintCss);
+  else t=tintCss+t;
+  return t;
+}
+const svgStrokeTintCache={};
+function tintedSvgUrl(src, strokeColor){
+  if(!strokeColor || !isSvgDataUrl(src)) return src;
+  const key=src+"\0"+strokeColor;
+  if(svgStrokeTintCache[key]) return svgStrokeTintCache[key];
+  const text=applySvgStrokeColor(fixSvgXmlns(decodeSvgDataUrl(src)), strokeColor);
+  const url="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(text);
+  svgStrokeTintCache[key]=url;
+  return url;
+}
+function nodeImageSrc(n){
+  if(!n || !n.img) return "";
+  return tintedSvgUrl(n.img, n.strokeColor||null);
+}
+function nodeIsSvgImage(n){
+  return n && n.shape==="image" && isSvgDataUrl(n.img);
+}
+function isImageFile(f){
+  if(!f) return false;
+  if(f.type && f.type.startsWith("image/")) return true;
+  return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(f.name||"");
+}
+function addImageFromDataUrl(url, x=W/2, y=H/2, label=""){
+  const im=getImg(url);
+  const place=()=>{
+    pushUndo();
+    const maxD=320, nw=im.naturalWidth||200, nh=im.naturalHeight||200;
+    const sc=Math.min(1, maxD/Math.max(nw,nh));
+    const n=newNode("image",x,y,{
+      img:url, label:label||"",
+      w:Math.round(nw*sc), h:Math.round(nh*sc)
+    });
+    selectOnly("node",n.id);
+  };
+  if(im.complete && im.naturalWidth) place();
+  else im.onload=place;
+}
 
 /* ===================== Documento (páginas) ===================== */
 function blankPage(name){ return {name, nodes:[], edges:[], nextId:1}; }
@@ -504,7 +622,7 @@ const P=()=>doc.pages[doc.cur];
 
 /* ===================== Estado de UI ===================== */
 const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
-let mode="select", pendingShape=null, pendingIcon=null, connecting=null;
+let mode="select", pendingShape=null, pendingIcon=null, pendingCustomImg=null, connecting=null;
 let selN=new Set(), selE=new Set();
 let drag=null;                // {offs:{id:{dx,dy}}, wps:[{w,dx,dy}]}
 let resizing=null;            // {id, fx, fy, aspect}
@@ -1000,7 +1118,7 @@ function drawNode(c,n,t,theme,isExport){
   const T=THEMES[theme];
 
   if(n.shape==="image" && n.img){
-    const im=getImg(n.img);
+    const im=getImg(nodeImageSrc(n));
     if(im.complete && im.naturalWidth){
       if(glow>0){c.shadowColor="#3aa7e8"; c.shadowBlur=20*glow;}
       c.drawImage(im, n.x-n.w/2, n.y-n.h/2, n.w, n.h);
@@ -1217,7 +1335,7 @@ function render(c,t,opts={}){
   for(const e of P().edges) drawEdge(c,e,t,theme,isExport);
   for(const n of P().nodes) drawNode(c,n,t,theme,isExport);
 
-  if(mode==="select" && !drag && !resizing && !wpDrag && !connectDrag && !marquee && !pendingShape && !pendingIcon){
+  if(mode==="select" && !drag && !resizing && !wpDrag && !connectDrag && !marquee && !pendingShape && !pendingIcon && !pendingCustomImg){
     if(hoverNode) drawSideArrows(c,hoverNode);
   }
   if(connectDrag){
@@ -1351,13 +1469,19 @@ cv.addEventListener("pointerdown", ev=>{
   commitEditBox();
   cv.setPointerCapture(ev.pointerId);
 
-  if(pendingShape || pendingIcon){
+  if(pendingShape || pendingIcon || pendingCustomImg){
     pushUndo();
     let n;
-    if(pendingIcon) n=newNode("icon",p.x,p.y,{icon:pendingIcon, label:ICONS[pendingIcon].n});
+    if(pendingCustomImg){
+      const url=pendingCustomImg.url, label=pendingCustomImg.label||"";
+      const im=getImg(url);
+      const nw=im.naturalWidth||200, nh=im.naturalHeight||200;
+      const maxD=320, sc=Math.min(1, maxD/Math.max(nw,nh));
+      n=newNode("image",p.x,p.y,{img:url, label, w:Math.round(nw*sc), h:Math.round(nh*sc)});
+    } else if(pendingIcon) n=newNode("icon",p.x,p.y,{icon:pendingIcon, label:ICONS[pendingIcon].n});
     else n=newNode(pendingShape,p.x,p.y);
     selectOnly("node",n.id);
-    pendingShape=null; pendingIcon=null; syncRail();
+    pendingShape=null; pendingIcon=null; pendingCustomImg=null; syncRail();
     return;
   }
   const n=hitNode(p.x,p.y);
@@ -1491,7 +1615,7 @@ cv.addEventListener("pointermove", ev=>{
   }
   const single=singleSel();
   let cur="default";
-  if(pendingShape||pendingIcon||mode==="connect"||connectDrag) cur="crosshair";
+  if(pendingShape||pendingIcon||pendingCustomImg||mode==="connect"||connectDrag) cur="crosshair";
   else if(single&&single.type==="node"&&single.obj&&hitCorner(single.obj,p.x,p.y)>=0) cur="nwse-resize";
   else if(hoverNode&&hitSideArrow(hoverNode,p.x,p.y)) cur="crosshair";
   else if(hoverNode) cur="grab";
@@ -1602,7 +1726,7 @@ document.addEventListener("keydown", ev=>{
     return;
   }
   if(ev.key==="Delete"||ev.key==="Backspace") deleteSel();
-  if(ev.key==="Escape"){ pendingShape=null; pendingIcon=null; connecting=null; connectDrag=null; marquee=null; $("iconDrawer").style.display="none"; syncRail(); }
+  if(ev.key==="Escape"){ pendingShape=null; pendingIcon=null; pendingCustomImg=null; connecting=null; connectDrag=null; marquee=null; $("iconDrawer").style.display="none"; syncRail(); }
   if(k==="v") setMode("select");
   if(k==="c") setMode("connect");
   if(ev.key===" "){ ev.preventDefault(); togglePlay(); }
@@ -1633,14 +1757,18 @@ cv.addEventListener("wheel", ev => {
 function addImageFromBlob(blob, x=W/2, y=H/2){
   const fr=new FileReader();
   fr.onload=()=>{
-    const url=fr.result, im=new Image();
-    im.onload=()=>{
-      pushUndo();
-      const maxD=320, sc=Math.min(1, maxD/Math.max(im.naturalWidth,im.naturalHeight));
-      const n=newNode("image",x,y,{img:url, w:Math.round(im.naturalWidth*sc), h:Math.round(im.naturalHeight*sc)});
-      selectOnly("node",n.id);
-    };
-    im.src=url;
+    let url=fr.result;
+    // Si es SVG en texto, corregir xmlns roto antes de usarlo
+    if(typeof url==="string" && url.startsWith("data:image/svg+xml")){
+      try{
+        const comma=url.indexOf(",");
+        const meta=url.slice(0,comma), payload=url.slice(comma+1);
+        const raw=meta.includes(";base64")? decodeURIComponent(escape(atob(payload))) : decodeURIComponent(payload);
+        const fixed=fixSvgXmlns(raw);
+        url="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(fixed);
+      }catch(e){ /* dejar url original */ }
+    }
+    addImageFromDataUrl(url, x, y);
   };
   fr.readAsDataURL(blob);
 }
@@ -1653,13 +1781,12 @@ document.addEventListener("paste", ev=>{
     pasteClip(); ev.preventDefault(); return;
   }
   for(const it of ev.clipboardData.items){
-    if(it.type.startsWith("image/")){
+    if(it.type.startsWith("image/") || it.type==="image/svg+xml"){
       addImageFromBlob(it.getAsFile());
       ev.preventDefault();
       return;
     }
   }
-  // sin imagen ni datos cx-adg: pegar el portapapeles interno si existe
   if(clip) pasteClip();
 });
 cv.addEventListener("dragover", ev=>ev.preventDefault());
@@ -1667,13 +1794,13 @@ cv.addEventListener("drop", ev=>{
   ev.preventDefault();
   const p=toWorld(ev);
   for(const f of ev.dataTransfer.files){
-    if(f.type.startsWith("image/")){ addImageFromBlob(f,p.x,p.y); return; }
+    if(isImageFile(f)){ addImageFromBlob(f,p.x,p.y); return; }
   }
 });
 $("btnImg").onclick=()=>$("imgIn").click();
 $("imgIn").onchange=ev=>{
   const f=ev.target.files[0];
-  if(f) addImageFromBlob(f);
+  if(f && isImageFile(f)) addImageFromBlob(f);
   ev.target.value="";
 };
 
@@ -1701,9 +1828,11 @@ function refreshPanel(){
   ["rowColor","rowShape","rowPulse","rowOrder"].forEach(r=>$(r).style.display=isNode?"flex":"none");
   ["rowRoute","rowFrom","rowTo","rowAnim","rowDash","rowArrS","rowArrE","rowFlow","rowLineC","rowDotC"].forEach(r=>$(r).style.display=isNode?"none":"flex");
   $("rowColor").style.display=isNode?"flex":"none";
+  $("rowImgStroke").style.display=(isNode && nodeIsSvgImage(obj))?"flex":"none";
   $("btnWps").style.display=(!isNode&&(obj.waypoints||[]).length)?"block":"none";
   if(isNode){
     if(obj.shape==="image"||obj.shape==="icon") $("rowShape").style.display="none";
+    if(obj.shape==="image") $("rowColor").style.display="none";
     $("shapeSel").value=["image","icon"].includes(obj.shape)?"rect":obj.shape;
     $("pulseChk").checked=!!obj.pulse;
     $("orderIn").value=obj.order;
@@ -1711,6 +1840,9 @@ function refreshPanel(){
       sw.classList.toggle("sel", sw.dataset.c===obj.color);
       if(sw.dataset.rectOnly) sw.style.display=obj.shape==="rect"?"":"none";
     });
+    if(nodeIsSvgImage(obj)){
+      [...$("imgStrokeSw").children].forEach(sw=>sw.classList.toggle("sel", (obj.strokeColor||"")===sw.dataset.c));
+    }
   } else {
     $("routeSel").value=obj.route||"straight";
     $("fromSel").value=obj.fromSide||"";
@@ -1787,6 +1919,30 @@ function buildTextSwatches(){
   TEXT_COLORS.forEach(p=>mk(p.c,p.n));
 }
 buildTextSwatches();
+function buildImgStrokeSwatches(){
+  const cont=$("imgStrokeSw");
+  const mk=(color,title)=>{
+    const d=document.createElement("div");
+    d.className="swatch";
+    d.style.background = color || "repeating-linear-gradient(45deg,#5a5a5a 0 4px,#2e3134 4px 8px)";
+    d.title=title; d.dataset.c=color||"";
+    d.onclick=()=>{
+      if(!selN.size) return;
+      pushUndo();
+      let any=false;
+      selN.forEach(id=>{
+        const n=nodeById(id);
+        if(n && nodeIsSvgImage(n)){ n.strokeColor=color||null; any=true; }
+      });
+      if(any){ refreshPanel(); scheduleAutosave(); }
+    };
+    cont.appendChild(d);
+  };
+  mk(null,"Original");
+  PALETTE.forEach(p=>mk(p.c,p.n));
+  TEXT_COLORS.forEach(p=>mk(p.c,p.n));
+}
+buildImgStrokeSwatches();
 FONT_OPTIONS.forEach(f=>{
   const o=document.createElement("option");
   o.value=f.id; o.textContent=f.label;
@@ -1838,11 +1994,11 @@ $("mDup").onclick=dupSel;
 $("mDel").onclick=deleteSel;
 
 /* ===================== Rail / barra superior ===================== */
-function setMode(m){ mode=m; pendingShape=null; pendingIcon=null; connecting=null; syncRail(); }
+function setMode(m){ mode=m; pendingShape=null; pendingIcon=null; pendingCustomImg=null; connecting=null; syncRail(); }
 function syncRail(){
   document.querySelectorAll(".rail button").forEach(b=>{
     b.classList.toggle("toggled",
-      (b.dataset.mode && b.dataset.mode===mode && !pendingShape && !pendingIcon) ||
+      (b.dataset.mode && b.dataset.mode===mode && !pendingShape && !pendingIcon && !pendingCustomImg) ||
       (b.dataset.shape && b.dataset.shape===pendingShape));
   });
   $("btnIcons").classList.toggle("toggled", $("iconDrawer").style.display==="block");
@@ -1850,7 +2006,7 @@ function syncRail(){
 document.querySelectorAll(".rail button[data-mode],.rail button[data-shape]").forEach(b=>{
   b.onclick=()=>{
     if(b.dataset.mode) setMode(b.dataset.mode);
-    else { pendingShape=b.dataset.shape; pendingIcon=null; mode="select"; connecting=null; syncRail(); }
+    else { pendingShape=b.dataset.shape; pendingIcon=null; pendingCustomImg=null; mode="select"; connecting=null; syncRail(); }
   };
 });
 function togglePlay(){
@@ -1884,12 +2040,44 @@ $("btnClear").onclick=()=>{ if(confirm("¿Borrar todo el contenido de esta pági
       const b=document.createElement("button");
       b.innerHTML=`<img src="${iconURL[k]}" alt=""><span>${ICONS[k].n}</span>`;
       b.title=ICONS[k].n;
-      b.onclick=()=>{ pendingIcon=k; pendingShape=null; mode="select"; dr.style.display="none"; syncRail(); };
+      b.onclick=()=>{ pendingIcon=k; pendingShape=null; pendingCustomImg=null; mode="select"; dr.style.display="none"; syncRail(); };
       grid.appendChild(b);
     }
     dr.appendChild(grid);
   }
 })();
+async function loadCustomSvgDrawer(){
+  const dr=$("iconDrawer");
+  const h=document.createElement("h4"); h.textContent="Proyecto (svg/)";
+  const grid=document.createElement("div"); grid.className="iconGrid";
+  let any=false;
+  for(const asset of CUSTOM_SVGS){
+    try{
+      const resp=await fetch(asset.path);
+      if(!resp.ok) throw new Error("HTTP "+resp.status);
+      const fixed=fixSvgXmlns(await resp.text());
+      const dataUrl="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(fixed);
+      getImg(dataUrl);
+      const b=document.createElement("button");
+      b.innerHTML=`<img src="${dataUrl}" alt=""><span>${asset.n}</span>`;
+      b.title=asset.n+" ("+asset.path+")";
+      b.onclick=()=>{
+        pendingCustomImg={url:dataUrl, label:asset.n};
+        pendingIcon=null; pendingShape=null; mode="select";
+        dr.style.display="none"; syncRail();
+      };
+      grid.appendChild(b);
+      any=true;
+    }catch(err){
+      console.warn("No se pudo cargar", asset.path, err);
+    }
+  }
+  if(any){
+    dr.insertBefore(grid, dr.firstChild);
+    dr.insertBefore(h, grid);
+  }
+}
+loadCustomSvgDrawer();
 $("btnIcons").onclick=()=>{
   const dr=$("iconDrawer");
   dr.style.display=dr.style.display==="block"?"none":"block";
@@ -2102,8 +2290,9 @@ function hexPointsSVG(n){
   ].map(p=>p.map(v=>v.toFixed(2)).join(",")).join(" ");
 }
 function renderImageToSVG(n){
-  if(!n.img) return "";
-  return `<image x="${(n.x-n.w/2).toFixed(2)}" y="${(n.y-n.h/2).toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(n.img)}" preserveAspectRatio="xMidYMid meet"/>`;
+  const src=nodeImageSrc(n);
+  if(!src) return "";
+  return `<image x="${(n.x-n.w/2).toFixed(2)}" y="${(n.y-n.h/2).toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(src)}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 function renderNodeToSVG(n, theme){
   const outline=nodeRectOutline(n);

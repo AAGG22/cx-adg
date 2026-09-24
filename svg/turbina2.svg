@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 550" width="100%" height="100%">
+  <style>
+    .rotor-group {
+      transform-origin: 200px 150px;
+      animation: spin-real 8s linear infinite;
+    }
+    @keyframes spin-real {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .st-tower { fill: #d8dbe2; stroke: #b0b5c1; stroke-width: 1; }
+    .st-blade { fill: #e9ecf0; stroke: #b0b5c1; stroke-width: 1.5; stroke-linejoin: round; }
+    .st-hub { fill: #a2a8b6; }
+    .st-ground { fill: #a3c9a8; }
+  </style>
+
+  <!-- Suelo curvo inferior -->
+  <path d="M 0 520 Q 200 500 400 520 L 400 550 L 0 550 Z" class="st-ground" />
+
+  <!-- Torre (Más estilizada y alta) -->
+  <polygon points="193,150 207,150 214,510 186,510" class="st-tower" />
+  
+  <!-- Base de la torre -->
+  <rect x="182" y="505" width="36" height="8" rx="2" fill="#5a6170" />
+
+  <!-- Grupo del Rotor (Buje + Aspas con rotación matemática de 120°) -->
+  <g class="rotor-group">
+    
+    <!-- Aspa 1 (Apuntando verticalmente hacia arriba a 0°) -->
+    <g transform="rotate(0, 200, 150)">
+      <path d="M 200 150 
+               C 194 120, 180 70, 196 15 
+               C 198 5, 202 5, 204 15 
+               C 220 70, 206 120, 200 150 Z" class="st-blade" />
+    </g>
+    
+    <!-- Aspa 2 (Rotada 120° perfectamente) -->
+    <g transform="rotate(120, 200, 150)">
+      <path d="M 200 150 
+               C 194 120, 180 70, 196 15 
+               C 198 5, 202 5, 204 15 
+               C 220 70, 206 120, 200 150 Z" class="st-blade" />
+    </g>
+    
+    <!-- Aspa 3 (Rotada 240° perfectamente) -->
+    <g transform="rotate(240, 200, 150)">
+      <path d="M 200 150 
+               C 194 120, 180 70, 196 15 
+               C 198 5, 202 5, 204 15 
+               C 220 70, 206 120, 200 150 Z" class="st-blade" />
+    </g>
+
+    <!-- Buje central (El círculo del medio con borde blanco tipo dona) -->
+    <circle cx="200" cy="150" r="14" class="st-hub" />
+    <circle cx="200" cy="150" r="6" fill="#ffffff" />
+  </g>
+</svg>
