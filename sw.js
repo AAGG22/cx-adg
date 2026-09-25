@@ -1,6 +1,7 @@
-const CACHE = "cx-adg-static-v17";
+const CACHE = "cx-adg-static-v24";
 const ASSETS = [
   "./", "./index.html", "./manifest.webmanifest", "./sw.js",
+  "./vendor/UPNG.js",
   "./svg/turbina2.svg", "./svg/turbina3.svg", "./svg/bateria1.svg"
 ];
 const GIF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/";
@@ -40,7 +41,7 @@ function cacheFirst(request, fallback) {
   });
 }
 
-/** HTML / navegación: red primero para no quedar atrapado en UI vieja (ej. sin APNG). */
+/** HTML / SW / encoder: red primero para no quedar atrapado en UI o UPNG viejos. */
 function networkFirst(request, fallback) {
   return fetch(request).then((resp) => {
     if (resp.ok) {
@@ -66,7 +67,9 @@ self.addEventListener("fetch", (ev) => {
 
   const isNav = ev.request.mode === "navigate";
   const isHtml = url.pathname.endsWith(".html") || url.pathname === "/" || url.pathname.endsWith("/");
-  if (isNav || isHtml || url.pathname.endsWith("/sw.js")) {
+  const isSw = url.pathname.endsWith("/sw.js");
+  const isUpng = url.pathname.includes("/vendor/UPNG.js");
+  if (isNav || isHtml || isSw || isUpng) {
     ev.respondWith(networkFirst(ev.request, "./index.html"));
     return;
   }

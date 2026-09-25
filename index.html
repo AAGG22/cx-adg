@@ -125,7 +125,10 @@
   .overlay{
     position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; z-index:50;
   }
-  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:24px 28px; min-width:320px;}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:20px 22px; width:min(400px, 92vw); max-width:400px; min-width:0; box-sizing:border-box;
+  }
   .card h2{font-family:Georgia,serif; font-size:17px; font-weight:normal; margin-bottom:14px;}
   #bar{width:100%; height:8px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:12px;}
   #barFill{height:100%; width:0%; background:var(--accent); transition:width .15s;}
@@ -280,6 +283,10 @@
         <div class="row" id="rowImgStroke" style="flex-direction:column; align-items:stretch; display:none;">
           <label>Color de contorno (SVG)</label>
           <div class="swatches" id="imgStrokeSw"></div>
+        </div>
+        <div class="row" id="rowImgFlip" style="display:none;">
+          <label>Voltear horizontal</label>
+          <input type="checkbox" id="imgFlipH">
         </div>
         <div class="row" id="rowFont"><label>Fuente</label>
           <select id="fontSel"></select>
@@ -1121,7 +1128,16 @@ function drawNode(c,n,t,theme,isExport){
     const im=getImg(nodeImageSrc(n));
     if(im.complete && im.naturalWidth){
       if(glow>0){c.shadowColor="#3aa7e8"; c.shadowBlur=20*glow;}
-      c.drawImage(im, n.x-n.w/2, n.y-n.h/2, n.w, n.h);
+      const ix=n.x-n.w/2, iy=n.y-n.h/2;
+      if(n.flipH){
+        c.save();
+        c.translate(n.x, n.y);
+        c.scale(-1, 1);
+        c.drawImage(im, -n.w/2, -n.h/2, n.w, n.h);
+        c.restore();
+      } else {
+        c.drawImage(im, ix, iy, n.w, n.h);
+      }
       c.shadowBlur=0;
     }
     if(n.label) drawLabelLines(c,n,theme,14,n.y+n.h/2+14);
@@ -1829,6 +1845,7 @@ function refreshPanel(){
   ["rowRoute","rowFrom","rowTo","rowAnim","rowDash","rowArrS","rowArrE","rowFlow","rowLineC","rowDotC"].forEach(r=>$(r).style.display=isNode?"none":"flex");
   $("rowColor").style.display=isNode?"flex":"none";
   $("rowImgStroke").style.display=(isNode && nodeIsSvgImage(obj))?"flex":"none";
+  $("rowImgFlip").style.display=(isNode && obj.shape==="image")?"flex":"none";
   $("btnWps").style.display=(!isNode&&(obj.waypoints||[]).length)?"block":"none";
   if(isNode){
     if(obj.shape==="image"||obj.shape==="icon") $("rowShape").style.display="none";
@@ -1836,6 +1853,7 @@ function refreshPanel(){
     $("shapeSel").value=["image","icon"].includes(obj.shape)?"rect":obj.shape;
     $("pulseChk").checked=!!obj.pulse;
     $("orderIn").value=obj.order;
+    if(obj.shape==="image") $("imgFlipH").checked=!!obj.flipH;
     [...$("swatches").children].forEach(sw=>{
       sw.classList.toggle("sel", sw.dataset.c===obj.color);
       if(sw.dataset.rectOnly) sw.style.display=obj.shape==="rect"?"":"none";
@@ -1977,6 +1995,10 @@ $("fsIn").addEventListener("input", ()=>{
 });
 $("shapeSel").onchange=()=>{ const n=singleNode(); if(n&&n.shape!=="image"&&n.shape!=="icon"){ pushUndo(); n.shape=$("shapeSel").value; if(n.shape!=="rect"&&isOutlineColor(n.color)) n.color=PALETTE[0].c; refreshPanel(); scheduleAutosave(); } };
 $("pulseChk").onchange=()=>{ const n=singleNode(); if(n){ pushUndo(); n.pulse=$("pulseChk").checked; scheduleAutosave(); } };
+$("imgFlipH").onchange=()=>{
+  const n=singleNode();
+  if(n && n.shape==="image"){ pushUndo(); n.flipH=$("imgFlipH").checked; scheduleAutosave(); }
+};
 $("orderIn").onchange=()=>{ const n=singleNode(); if(n){ pushUndo(); n.order=+$("orderIn").value||0; scheduleAutosave(); } };
 $("routeSel").onchange=()=>{ const e=singleEdge(); if(e){ pushUndo(); e.route=$("routeSel").value; scheduleAutosave(); } };
 $("fromSel").onchange=()=>{ const e=singleEdge(); if(e){ pushUndo(); e.fromSide=$("fromSel").value||null; e.waypoints=[]; refreshPanel(); scheduleAutosave(); } };
@@ -2292,7 +2314,12 @@ function hexPointsSVG(n){
 function renderImageToSVG(n){
   const src=nodeImageSrc(n);
   if(!src) return "";
-  return `<image x="${(n.x-n.w/2).toFixed(2)}" y="${(n.y-n.h/2).toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(src)}" preserveAspectRatio="xMidYMid meet"/>`;
+  const x=n.x-n.w/2, y=n.y-n.h/2;
+  if(n.flipH){
+    // Espejo horizontal alrededor del centro del nodo
+    return `<image x="${(-n.w/2).toFixed(2)}" y="${(n.y-n.h/2).toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(src)}" transform="translate(${n.x.toFixed(2)} 0) scale(-1 1)" preserveAspectRatio="xMidYMid meet"/>`;
+  }
+  return `<image x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(src)}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 function renderNodeToSVG(n, theme){
   const outline=nodeRectOutline(n);
@@ -2412,13 +2439,18 @@ function syncExportRows(){
   $("exRowOnce").style.display = anim ? "flex":"none";
   $("exHint").style.display = (anim||f==="svg") ? "block":"none";
   if(f==="svg") $("exHint").textContent="SVG exporta el área 2560×1440. Con fondo transparente no se incluyen el color de fondo, la cuadrícula ni el marco punteado.";
-  else if(f==="apng") $("exHint").textContent="APNG = PNG animado con alpha real (sin flash negro). "+exportDurationExplain()+" «No repetir» = una sola pasada.";
+  else if(f==="apng") $("exHint").textContent="APNG sin pérdida de color (lossless). "+exportDurationExplain()+" Para que se vea como en el editor: dejá fondo transparente OFF (conserva el fondo del tema). Con transparencia, textos claros se pierden sobre fondos claros del navegador.";
   else if(f==="gif") $("exHint").textContent="GIF clásico (.gif). "+exportDurationExplain()+" Transparencia GIF es de 1 bit (para alpha limpio usá APNG).";
 }
-$("exFmt").onchange=syncExportRows;
+$("exFmt").onchange=()=>{
+  if($("exFmt").value==="apng") $("exTr").checked=false;
+  syncExportRows();
+};
 $("btnExport").onclick=()=>{
   // Prefijar duración completa de la animación actual; el usuario puede bajarla
   $("exDur").value=suggestedExportDuration();
+  // APNG: por defecto fondo del tema (no transparente) para no “lavar” el diagrama
+  if($("exFmt").value==="apng") $("exTr").checked=false;
   exModal.style.display="flex";
   syncExportRows();
 };
@@ -2463,11 +2495,44 @@ function loadScriptOnce(src, globalCheck){
     document.head.appendChild(s);
   });
 }
+/** CRC32 PNG (el UPNG vendored no expone UPNG.crc). */
+const _PNG_CRC_TABLE=(()=>{
+  const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){
+    let c=n;
+    for(let k=0;k<8;k++) c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1);
+    t[n]=c>>>0;
+  }
+  return t;
+})();
+function pngCrc32(buf, off, len){
+  let c=0xffffffff;
+  for(let i=0;i<len;i++) c=_PNG_CRC_TABLE[(c^buf[off+i])&0xff]^(c>>>8);
+  return (c^0xffffffff)>>>0;
+}
+/**
+ * upng-js@2.1.0 (CDN) reserva un buffer de salida ≈ raw RGBA y TRUNCA el APNG
+ * cuando el PNG comprimido + overhead supera eso → animación corta (~2.5s).
+ * Usamos el encoder de Photopea (vendor/UPNG.js) que dimensiona el buffer exacto.
+ */
 async function ensureUPNG(){
-  if(window.UPNG) return;
   await loadScriptOnce("https://cdn.jsdelivr.net/npm/pako@1.0.11/dist/pako.min.js", ()=>!!window.pako);
-  await loadScriptOnce("https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.js", ()=>!!window.UPNG);
-  if(!window.UPNG) throw new Error("UPNG no disponible");
+  if(window.UPNG && window.UPNG.__cxAdgVendor) return;
+  await new Promise((resolve,reject)=>{
+    const s=document.createElement("script");
+    s.src="./vendor/UPNG.js?v=24";
+    s.async=true;
+    s.onload=()=>{
+      if(!window.UPNG||typeof window.UPNG.encode!=="function"){
+        reject(new Error("UPNG vendor no disponible"));
+        return;
+      }
+      window.UPNG.__cxAdgVendor=1;
+      resolve();
+    };
+    s.onerror=()=>reject(new Error("No se pudo cargar vendor/UPNG.js"));
+    document.head.appendChild(s);
+  });
 }
 function animExportTiming(){
   const fps=+$("exFps").value;
@@ -2478,68 +2543,220 @@ function animExportTiming(){
   const exSpeed=cycles/flowDur;
   return { fps, dur, exSpeed, frames:Math.round(dur*fps), delay:Math.round(1000/fps) };
 }
+/**
+ * Prioridad: resolución alta (como el export “de antes”).
+ * Orden: techo de lado largo → menos frames (delay más largo, misma duración)
+ * → bajar fps → solo al final bajar de ~960px.
+ * El encoder Photopea ya no trunca; alargar delay es seguro.
+ */
+function planApngExport(w, h, dur, fps){
+  const MAX_RAW=150*1024*1024;
+  const MIN_EDGE=960;
+  const MAX_EDGE=1920;
+  const MIN_FRAMES=24;
+  const targetDur=Math.max(0.5, +dur||1);
+  let useFps=Math.max(10, Math.min(20, +fps||20));
+  let tw=Math.max(1, Math.round(w));
+  let th=Math.max(1, Math.round(h));
+
+  const long0=Math.max(tw, th);
+  if(long0>MAX_EDGE){
+    const s=MAX_EDGE/long0;
+    tw=Math.max(1, Math.round(tw*s));
+    th=Math.max(1, Math.round(th*s));
+  }
+
+  let frames=Math.max(1, Math.round(targetDur*useFps));
+  const fits=()=>tw*th*4*frames<=MAX_RAW;
+
+  // 1) Menos frames, misma duración (delay más largo) — conserva nitidez
+  while(!fits() && frames>MIN_FRAMES){
+    frames=Math.max(MIN_FRAMES, Math.floor(frames*0.9));
+  }
+
+  // 2) Bajar fps objetivo (recalcula tope de frames)
+  while(!fits() && useFps>10){
+    useFps-=1;
+    frames=Math.min(frames, Math.max(MIN_FRAMES, Math.round(targetDur*useFps)));
+  }
+
+  // 3) Solo si sigue sin entrar: bajar resolución hasta ~960
+  while(!fits() && Math.max(tw,th)>MIN_EDGE){
+    const s=0.92;
+    let ntw=Math.max(1, Math.round(tw*s));
+    let nth=Math.max(1, Math.round(th*s));
+    if(Math.max(ntw,nth)<MIN_EDGE){
+      const s2=MIN_EDGE/Math.max(tw,th);
+      tw=Math.max(1, Math.round(tw*s2));
+      th=Math.max(1, Math.round(th*s2));
+      break;
+    }
+    tw=ntw; th=nth;
+  }
+
+  // 4) Último recurso bajo 960
+  while(!fits() && Math.max(tw,th)>480){
+    tw=Math.max(1, Math.round(tw*0.9));
+    th=Math.max(1, Math.round(th*0.9));
+  }
+  while(!fits() && frames>16){
+    frames=Math.max(16, Math.floor(frames*0.9));
+  }
+
+  const delay=Math.max(20, Math.round((targetDur*1000)/frames));
+  const playSec=frames*delay/1000;
+
+  return {
+    w:tw, h:th, frames, delay, fps:useFps,
+    playSec, dur:targetDur,
+    rawMB:Math.round(tw*th*4*frames/1024/1024)
+  };
+}
 function setProgTitle(text){
   const el=$("ovTitle");
   if(el) el.textContent=text;
 }
-/** APNG: num_plays 0=infinito, 1=una vez. UPNG fija 0; parcheamos acTL + CRC. */
+function setExportProgress(fill, pct){
+  fill.style.transition="none";
+  fill.style.width=Math.max(0, Math.min(100, pct))+"%";
+}
+/** Recorre chunks PNG; para cada fcTL fuerza delay_num/delay_den. */
+function patchApngDelays(pngBuf, delayMs){
+  const data=new Uint8Array(pngBuf);
+  const dv=new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const ms=Math.max(1, Math.min(65535, delayMs|0));
+  let offset=8, patched=0;
+  while(offset+12<=data.length){
+    const len=dv.getUint32(offset);
+    const t0=data[offset+4], t1=data[offset+5], t2=data[offset+6], t3=data[offset+7];
+    if(t0===0x66&&t1===0x63&&t2===0x54&&t3===0x4c&&len>=26){
+      const d0=offset+8;
+      dv.setUint16(d0+20, ms);
+      dv.setUint16(d0+22, 1000);
+      dv.setUint32(offset+8+len, pngCrc32(data, offset+4, 4+len));
+      patched++;
+    }
+    if(t0===0x49&&t1===0x45&&t2===0x4e&&t3===0x44) break;
+    offset+=12+len;
+    if(len>data.length) break;
+  }
+  return { buffer:data.buffer.slice(data.byteOffset, data.byteOffset+data.byteLength), patched };
+}
+/** APNG: num_plays 0=infinito, 1=una vez. */
 function setApngNumPlays(pngBuf, numPlays){
   const data=new Uint8Array(pngBuf);
-  for(let i=8;i<data.length-16;i++){
-    if(data[i]===0x61&&data[i+1]===0x63&&data[i+2]===0x54&&data[i+3]===0x4c){
-      const dv=new DataView(data.buffer, data.byteOffset, data.byteLength);
-      dv.setUint32(i+8, numPlays>>>0);
-      const crc=UPNG.crc.crc(data, i, 12);
-      dv.setUint32(i+12, crc>>>0);
+  const dv=new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let offset=8;
+  while(offset+12<=data.length){
+    const len=dv.getUint32(offset);
+    const t0=data[offset+4], t1=data[offset+5], t2=data[offset+6], t3=data[offset+7];
+    if(t0===0x61&&t1===0x63&&t2===0x54&&t3===0x4c&&len>=8){
+      dv.setUint32(offset+8+4, numPlays>>>0);
+      dv.setUint32(offset+8+len, pngCrc32(data, offset+4, 4+len));
       return data.buffer.slice(data.byteOffset, data.byteOffset+data.byteLength);
     }
+    if(t0===0x49&&t1===0x45&&t2===0x4e&&t3===0x44) break;
+    offset+=12+len;
   }
   return pngBuf;
 }
+/** Suma delays reales del archivo (ms → s). */
+function measureApngPlaySec(pngBuf){
+  const out=UPNG.decode(pngBuf);
+  if(!out.frames||!out.frames.length) return { frames:0, playSec:0 };
+  let ms=0;
+  for(const fr of out.frames) ms+=fr.delay||0;
+  return { frames:out.frames.length, playSec:ms/1000 };
+}
 async function exportAPNG(scale, transparent, playOnce){
-  const { fps, exSpeed, frames, delay }=animExportTiming();
+  const timing=animExportTiming();
+  const { dur, exSpeed }=timing;
   const realSpeed=settings.speed;
   const ov=$("progOv"), fill=$("barFill"), msg=$("ovMsg");
   setProgTitle("Generando APNG…");
-  ov.style.display="flex"; fill.style.width="0%"; msg.textContent="Cargando encoder…";
+  ov.style.display="flex";
+  setExportProgress(fill, 0);
+  msg.textContent="Cargando encoder…";
+  let encTick=null;
   try{
     await ensureUPNG();
     const b=getBounds();
-    const w=Math.round(b.w*scale), h=Math.round(b.h*scale);
+    let w=Math.round(b.w*scale), h=Math.round(b.h*scale);
+    const plan=planApngExport(w, h, dur, timing.fps);
+    const fit=Math.min(plan.w/Math.max(1,w), plan.h/Math.max(1,h));
+    w=plan.w; h=plan.h;
+    const frames=plan.frames, delay=plan.delay;
+    const renderScale=scale*fit;
+    msg.textContent=`${w}×${h} · ${frames} frames · ${delay} ms → ${plan.playSec.toFixed(1)}s`;
+    await new Promise(r=>setTimeout(r, 40));
     const off=document.createElement("canvas"); off.width=w; off.height=h;
     const oc=off.getContext("2d",{willReadFrequently:true});
     const bufs=[], dels=[];
     settings.speed=exSpeed;
-    msg.textContent="Renderizando fotogramas…";
+    // 0–70%: todos los frames del plan, muestreando [0…dur]
     for(let f=0;f<frames;f++){
-      const t=f/fps;
-      if(transparent) oc.clearRect(0,0,w,h);
-      oc.save(); oc.scale(scale,scale); oc.translate(-b.x, -b.y);
+      const t=(frames<=1)? 0 : (f/(frames-1))*dur;
+      oc.setTransform(1,0,0,1,0,0);
+      oc.clearRect(0,0,w,h);
+      oc.save(); oc.scale(renderScale, renderScale); oc.translate(-b.x, -b.y);
       render(oc,t,{export:true, transparent:!!transparent, bounds:b});
       oc.restore();
       const rgba=oc.getImageData(0,0,w,h).data;
-      bufs.push(rgba.buffer.slice(rgba.byteOffset, rgba.byteOffset+rgba.byteLength));
+      const copy=new Uint8Array(rgba.byteLength);
+      copy.set(rgba);
+      bufs.push(copy.buffer);
       dels.push(delay);
-      if(f%3===0){ fill.style.width=(f/frames*55)+"%"; await new Promise(r=>setTimeout(r)); }
+      setExportProgress(fill, ((f+1)/frames)*70);
+      msg.textContent=`Frame ${f+1}/${frames} · t=${t.toFixed(1)}s / ${dur}s · ${w}×${h}`;
+      await new Promise(r=>setTimeout(r));
     }
     settings.speed=realSpeed;
-    msg.textContent="Codificando APNG (alpha)…";
-    fill.style.width="60%";
-    await new Promise(r=>setTimeout(r));
+    msg.textContent=`Codificando APNG · ${frames} frames · ${plan.playSec.toFixed(1)}s…`;
+    setExportProgress(fill, 72);
+    await new Promise(r=>setTimeout(r, 50));
+    // UPNG.encode es síncrono: animamos 72→92% mientras trabaja
+    let encPct=72;
+    encTick=setInterval(()=>{
+      encPct=Math.min(92, encPct+1.5);
+      setExportProgress(fill, encPct);
+    }, 120);
     let png=UPNG.encode(bufs,w,h,0,dels);
+    clearInterval(encTick); encTick=null;
+    bufs.length=0;
+    setExportProgress(fill, 94);
+    msg.textContent="Verificando duración…";
+    await new Promise(r=>setTimeout(r, 30));
+    const patched=patchApngDelays(png, delay);
+    png=patched.buffer;
     if(playOnce) png=setApngNumPlays(png, 1);
-    fill.style.width="100%";
+    const measured=measureApngPlaySec(png);
+    if(measured.frames < frames){
+      throw new Error(
+        `El encoder guardó ${measured.frames}/${frames} frames. Probá escala 0.5x.`
+      );
+    }
+    if(measured.playSec < dur*0.85){
+      throw new Error(
+        `Duración del archivo ${measured.playSec.toFixed(1)}s < pedida ${dur}s.`
+      );
+    }
+    msg.textContent=`Listo · ${measured.frames} frames · ${measured.playSec.toFixed(1)}s`;
+    setExportProgress(fill, 100);
+    await new Promise(r=>setTimeout(r, 200));
     const blob=new Blob([png],{type:"image/png"});
     const a=document.createElement("a");
     a.href=URL.createObjectURL(blob);
-    a.download=slug()+".png";
+    a.download=`${slug()}-${Math.round(measured.playSec*10)/10}s.png`;
     a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),5000);
     ov.style.display="none";
+    fill.style.transition="";
   }catch(err){
+    if(encTick) clearInterval(encTick);
     settings.speed=realSpeed;
     ov.style.display="none";
-    alert("No se pudo generar el APNG: "+err.message);
+    fill.style.transition="";
+    alert("No se pudo generar el APNG: "+err.message+"\nProbá escala 0.5x.");
   }
 }
 let workerUrl=null;
@@ -2607,7 +2824,7 @@ async function exportGIF(scale, transparent, playOnce){
 
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator)) return;
-  const register=()=> navigator.serviceWorker.register("./sw.js").catch(console.error);
+  const register=()=> navigator.serviceWorker.register("./sw.js?v=24").catch(console.error);
   if(document.readyState==="complete") register();
   else window.addEventListener("load", register, {once:true});
 }
