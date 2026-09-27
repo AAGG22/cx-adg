@@ -1,4 +1,4 @@
-const CACHE = "cx-adg-static-v26";
+const CACHE = "cx-adg-static-v27";
 const ASSETS = [
   "./", "./index.html", "./manifest.webmanifest", "./sw.js",
   "./vendor/UPNG.js",

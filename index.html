@@ -368,6 +368,12 @@
         <option value="2">2x (Muy grande)</option>
       </select>
     </div>
+    <div class="row" id="exRowArea"><label>Recorte</label>
+      <select id="exArea">
+        <option value="content" selected>Solo contenido</option>
+        <option value="workarea">Área completa 2560×1440</option>
+      </select>
+    </div>
     <div class="row" id="exRowTr"><label>Fondo transparente</label><input type="checkbox" id="exTr"></div>
     <div class="row" id="exRowFps"><label>FPS</label>
       <select id="exFps"><option>15</option><option selected>20</option><option>25</option></select>
@@ -665,6 +671,20 @@ function getBounds(){
   });
   mx-=40; my-=40; Mx+=40; My+=40;
   return {x: mx, y: my, w: Mx-mx, h: My-my};
+}
+/** content = bounding box de nodos/flechas; workarea = lienzo 2560×1440. */
+function getExportBounds(mode){
+  if(mode==="workarea") return {x:0, y:0, w:W, h:H};
+  const b=getBounds();
+  return {
+    x:b.x, y:b.y,
+    w:Math.max(1, b.w),
+    h:Math.max(1, b.h)
+  };
+}
+function exportAreaMode(){
+  const el=$("exArea");
+  return (el && el.value==="workarea") ? "workarea" : "content";
 }
 function workArea(){ return {x:0, y:0, w:W, h:H}; }
 function workAreaOverflow(){
@@ -2235,14 +2255,18 @@ function svgFillColor(hex, theme){
   const a=theme==="crema"?.16:.18;
   return `rgba(${v>>16&255},${v>>8&255},${v&255},${a})`;
 }
-function getExportDimensions(scale=1){
-  return { width:Math.round(W*scale), height:Math.round(H*scale) };
+function getExportDimensions(scale=1, bounds=null){
+  const b=bounds||{w:W, h:H};
+  return { width:Math.round(b.w*scale), height:Math.round(b.h*scale) };
 }
-function svgGrid(theme){
+function svgGrid(theme, bounds){
+  const b=bounds||{x:0, y:0, w:W, h:H};
   const col=escapeAttribute(THEMES[theme].grid);
   const lines=[];
-  for(let x=0; x<=W; x+=GRID) lines.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="${col}" stroke-width="1"/>`);
-  for(let y=0; y<=H; y+=GRID) lines.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${col}" stroke-width="1"/>`);
+  const x0=Math.floor(b.x/GRID)*GRID, y0=Math.floor(b.y/GRID)*GRID;
+  const x1=b.x+b.w, y1=b.y+b.h;
+  for(let x=x0; x<=x1; x+=GRID) lines.push(`<line x1="${x}" y1="${b.y}" x2="${x}" y2="${y1}" stroke="${col}" stroke-width="1"/>`);
+  for(let y=y0; y<=y1; y+=GRID) lines.push(`<line x1="${b.x}" y1="${y}" x2="${x1}" y2="${y}" stroke="${col}" stroke-width="1"/>`);
   return `<g id="grid" opacity="1">${lines.join("")}</g>`;
 }
 function svgWorkAreaFrame(theme, overflow){
@@ -2462,28 +2486,32 @@ function renderConnectorToSVG(e, theme){
   }
   return parts.join("\n");
 }
-function buildSVGDocument(scale=1, transparent=false){
-  const {width,height}=getExportDimensions(scale);
+function buildSVGDocument(scale=1, transparent=false, areaMode="content"){
+  const b=getExportBounds(areaMode);
+  const {width,height}=getExportDimensions(scale, b);
   const page=getCurrentPageForExport();
   const theme=doc.theme;
   const T=THEMES[theme];
   const overflow=workAreaOverflow();
+  const full=areaMode==="workarea";
   const parts=[
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${W} ${H}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="${b.x.toFixed(2)} ${b.y.toFixed(2)} ${b.w.toFixed(2)} ${b.h.toFixed(2)}">`,
     buildSVGDefs(),
   ];
-  if(!transparent) parts.push(`<rect width="${W}" height="${H}" fill="${escapeAttribute(T.bg)}"/>`);
-  if(settings.grid && !transparent) parts.push(svgGrid(theme));
+  if(!transparent){
+    parts.push(`<rect x="${b.x.toFixed(2)}" y="${b.y.toFixed(2)}" width="${b.w.toFixed(2)}" height="${b.h.toFixed(2)}" fill="${escapeAttribute(T.bg)}"/>`);
+  }
+  if(settings.grid && !transparent) parts.push(svgGrid(theme, b));
   for(const e of page.edges||[]) parts.push(renderConnectorToSVG(e,theme));
   for(const n of page.nodes||[]) parts.push(renderNodeToSVG(n,theme));
-  if(!transparent) parts.push(svgWorkAreaFrame(theme, overflow));
+  if(full && !transparent) parts.push(svgWorkAreaFrame(theme, overflow));
   parts.push("</svg>");
   return parts.join("\n");
 }
-function exportSVG(scale=1, transparent=false){
-  if(workAreaOverflow() && !confirm("Hay contenido fuera del área 2560×1440. El SVG lo recortará. ¿Exportar igual?")) return;
-  downloadTextFile(slug()+".svg", buildSVGDocument(scale, transparent), "image/svg+xml;charset=utf-8");
+function exportSVG(scale=1, transparent=false, areaMode="content"){
+  if(areaMode==="workarea" && workAreaOverflow() && !confirm("Hay contenido fuera del área 2560×1440. El SVG lo recortará. ¿Exportar igual?")) return;
+  downloadTextFile(slug()+".svg", buildSVGDocument(scale, transparent, areaMode), "image/svg+xml;charset=utf-8");
 }
 
 /* ===================== Exportación ===================== */
@@ -2491,20 +2519,24 @@ const exModal=$("exModal");
 function syncExportRows(){
   const f=$("exFmt").value;
   const anim=f==="gif"||f==="apng";
+  $("exRowArea").style.display="flex";
   $("exRowTr").style.display = (f==="png"||f==="gif"||f==="apng"||f==="svg") ? "flex":"none";
   $("exRowFps").style.display = anim ? "flex":"none";
   $("exRowApngQ").style.display = f==="apng" ? "flex":"none";
   $("exRowDur").style.display = anim ? "flex":"none";
   $("exRowOnce").style.display = anim ? "flex":"none";
-  $("exHint").style.display = (anim||f==="svg") ? "block":"none";
-  if(f==="svg") $("exHint").textContent="SVG exporta el área 2560×1440. Con fondo transparente no se incluyen el color de fondo, la cuadrícula ni el marco punteado.";
-  else if(f==="apng") $("exHint").textContent="APNG lossless. "+exportDurationExplain()+" Calidad: Fluidez = más fotogramas (menos trabado); Nitidez = más resolución. Fondo transparente OFF para verse como en el editor.";
-  else if(f==="gif") $("exHint").textContent="GIF clásico (.gif). "+exportDurationExplain()+" Transparencia GIF es de 1 bit (para alpha limpio usá APNG).";
+  $("exHint").style.display = "block";
+  const area=$("exArea").value==="workarea"?"área 2560×1440":"solo el recuadro de los elementos";
+  if(f==="svg") $("exHint").textContent="SVG: recorte = "+area+". Con fondo transparente no se incluyen fondo, cuadrícula ni marco.";
+  else if(f==="apng") $("exHint").textContent="APNG lossless. Recorte = "+area+". "+exportDurationExplain()+" Fluidez = más fps; Nitidez = más px. Transparente OFF para verse como en el editor.";
+  else if(f==="gif") $("exHint").textContent="GIF. Recorte = "+area+". "+exportDurationExplain()+" Transparencia GIF es de 1 bit (alpha limpio: APNG).";
+  else $("exHint").textContent="Recorte = "+area+".";
 }
 $("exFmt").onchange=()=>{
   if($("exFmt").value==="apng") $("exTr").checked=false;
   syncExportRows();
 };
+$("exArea").onchange=syncExportRows;
 $("btnExport").onclick=()=>{
   // Prefijar duración completa de la animación actual; el usuario puede bajarla
   $("exDur").value=suggestedExportDuration();
@@ -2520,15 +2552,16 @@ $("exGo").onclick=()=>{
   const fmt=$("exFmt").value, scale=+$("exRes").value;
   const transparent=$("exTr").checked;
   const playOnce=$("exOnce").checked;
+  const areaMode=exportAreaMode();
   exModal.style.display="none";
   if(P().nodes.length===0){ alert("La página está vacía."); return; }
-  if(fmt==="apng") exportAPNG(scale, transparent, playOnce);
-  else if(fmt==="gif") exportGIF(scale, transparent, playOnce);
-  else if(fmt==="svg") exportSVG(scale, transparent);
-  else exportStatic(fmt, scale, transparent);
+  if(fmt==="apng") exportAPNG(scale, transparent, playOnce, areaMode);
+  else if(fmt==="gif") exportGIF(scale, transparent, playOnce, areaMode);
+  else if(fmt==="svg") exportSVG(scale, transparent, areaMode);
+  else exportStatic(fmt, scale, transparent, areaMode);
 };
-function exportStatic(fmt,scale,transparent){
-  const b = getBounds();
+function exportStatic(fmt,scale,transparent, areaMode="content"){
+  const b=getExportBounds(areaMode);
   const w=Math.round(b.w*scale), h=Math.round(b.h*scale);
   const off=document.createElement("canvas"); off.width=w; off.height=h;
   const oc=off.getContext("2d");
@@ -2579,7 +2612,7 @@ async function ensureUPNG(){
   if(window.UPNG && window.UPNG.__cxAdgVendor) return;
   await new Promise((resolve,reject)=>{
     const s=document.createElement("script");
-    s.src="./vendor/UPNG.js?v=26";
+    s.src="./vendor/UPNG.js?v=27";
     s.async=true;
     s.onload=()=>{
       if(!window.UPNG||typeof window.UPNG.encode!=="function"){
@@ -2733,7 +2766,7 @@ function measureApngPlaySec(pngBuf){
   for(const fr of out.frames) ms+=fr.delay||0;
   return { frames:out.frames.length, playSec:ms/1000 };
 }
-async function exportAPNG(scale, transparent, playOnce){
+async function exportAPNG(scale, transparent, playOnce, areaMode="content"){
   const timing=animExportTiming();
   const { dur, exSpeed }=timing;
   const realSpeed=settings.speed;
@@ -2745,7 +2778,7 @@ async function exportAPNG(scale, transparent, playOnce){
   let encTick=null;
   try{
     await ensureUPNG();
-    const b=getBounds();
+    const b=getExportBounds(areaMode);
     let w=Math.round(b.w*scale), h=Math.round(b.h*scale);
     const apngQ=($("exApngQ")&&$("exApngQ").value)||"fluid";
     const plan=planApngExport(w, h, dur, timing.fps, apngQ);
@@ -2833,7 +2866,7 @@ async function getWorker(){
   workerUrl=URL.createObjectURL(new Blob([src],{type:"application/javascript"}));
   return workerUrl;
 }
-async function exportGIF(scale, transparent, playOnce){
+async function exportGIF(scale, transparent, playOnce, areaMode="content"){
   const { fps, exSpeed, frames, delay }=animExportTiming();
   const realSpeed=settings.speed;
 
@@ -2843,7 +2876,7 @@ async function exportGIF(scale, transparent, playOnce){
   try{
     if(typeof GIF!=="function") throw new Error("gif.js no está cargado");
     const wurl=await getWorker();
-    const b = getBounds();
+    const b=getExportBounds(areaMode);
     const w=Math.round(b.w*scale), h=Math.round(b.h*scale);
     if(w<1||h<1) throw new Error("Área de exportación inválida");
     const off=document.createElement("canvas"); off.width=w; off.height=h;
@@ -2891,7 +2924,7 @@ async function exportGIF(scale, transparent, playOnce){
 
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator)) return;
-  const register=()=> navigator.serviceWorker.register("./sw.js?v=26").catch(console.error);
+  const register=()=> navigator.serviceWorker.register("./sw.js?v=27").catch(console.error);
   if(document.readyState==="complete") register();
   else window.addEventListener("load", register, {once:true});
 }
