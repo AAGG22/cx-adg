@@ -530,57 +530,171 @@ function isOutlineFillHex(hex){
   // oscuro y poco saturado (gris/negro) o casi negro
   return lum<0.38 && (sat<0.45 || lum<0.18);
 }
-/**
- * Recolorea el contorno del SVG:
- * - strokes (líneas)
- * - fills oscuros de line-art (p. ej. SVG Repo: #outline con fill #222)
- * No altera fills de color (rojo, verde, etc.).
- */
-function applySvgStrokeColor(svgText, color){
-  if(!color) return svgText;
-  let t=String(svgText||"");
-  // Quitar tint previo
-  t=t.replace(/<style[^>]*\bid=["']cx-outline-tint["'][^>]*>[\s\S]*?<\/style>/gi,"");
-
-  // CSS: stroke: #xxx / rgb(...)
+/** Reescribe declaraciones CSS de stroke / fill-oscuro al color de contorno. */
+function tintCssText(css, color){
+  let t=String(css||"");
   t=t.replace(/stroke\s*:\s*#[0-9a-fA-F]{3,8}\b/g, `stroke:${color}`);
   t=t.replace(/stroke\s*:\s*rgb\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*\)/gi, `stroke:${color}`);
   t=t.replace(/stroke\s*:\s*rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*\)/gi, `stroke:${color}`);
-  // CSS: fill oscuro de contorno
   t=t.replace(/fill\s*:\s*(#[0-9a-fA-F]{3,8})\b/gi, (m, hex)=> isOutlineFillHex(hex) ? `fill:${color}` : m);
   t=t.replace(/fill\s*:\s*#000\b/gi, `fill:${color}`);
   t=t.replace(/fill\s*:\s*black\b/gi, `fill:${color}`);
+  return t;
+}
+function bakeShapeFill(el, color){
+  if(!el || !el.setAttribute) return;
+  el.removeAttribute("class");
+  el.setAttribute("fill", color);
+}
+/**
+ * Recolorea el contorno del SVG (única fuente de verdad para canvas y export).
+ * Usa DOMParser: en SVG-as-image el CSS (.st5{fill:#222}) gana al atributo fill,
+ * así que se reescribe el CSS y se hornea fill en el grupo #outline / .st5.
+ */
+function applySvgStrokeColor(svgText, color){
+  if(!color) return svgText;
+  const raw=fixSvgXmlns(String(svgText||""));
+  // DOMParser está en el navegador; fallback regex solo si falla el parseo.
+  let doc=null;
+  try{
+    doc=new DOMParser().parseFromString(raw, "image/svg+xml");
+    if(doc.querySelector("parsererror")) doc=null;
+  }catch(e){ doc=null; }
+  if(!doc || !doc.documentElement || doc.documentElement.localName.toLowerCase()!=="svg"){
+    return applySvgStrokeColorRegex(raw, color);
+  }
+  doc.querySelectorAll("style#cx-outline-tint").forEach(s=>s.remove());
+  doc.querySelectorAll("style").forEach(st=>{ st.textContent=tintCssText(st.textContent, color); });
 
-  // Atributos stroke="..."
+  const paintOutline=el=>{
+    el.querySelectorAll("path,polygon,circle,ellipse,rect,polyline").forEach(p=>bakeShapeFill(p, color));
+  };
+  doc.querySelectorAll("[id]").forEach(g=>{
+    const id=g.getAttribute("id")||"";
+    if(id==="outline" || /(^|-)outline$/i.test(id)) paintOutline(g);
+  });
+  // .st5 típico de SVG Repo (contorno); quitar clase para que no pise el fill
+  doc.querySelectorAll(".st5").forEach(el=>bakeShapeFill(el, color));
+
+  doc.querySelectorAll("[stroke]").forEach(el=>{
+    const s=el.getAttribute("stroke");
+    if(s && s.toLowerCase()!=="none") el.setAttribute("stroke", color);
+  });
+  doc.querySelectorAll("[fill]").forEach(el=>{
+    const f=el.getAttribute("fill");
+    if(f && isOutlineFillHex(f)) el.setAttribute("fill", color);
+    else if(f && /^black$/i.test(f)) el.setAttribute("fill", color);
+  });
+
+  const tintStyle=doc.createElementNS("http://www.w3.org/2000/svg", "style");
+  tintStyle.setAttribute("id", "cx-outline-tint");
+  tintStyle.textContent=
+    `.st5{fill:${color}!important}`+
+    `.st3,.st4{stroke:${color}!important}`+
+    `#outline path,[id$="-outline"] path,[id="outline"] path{fill:${color}!important}`+
+    `[stroke]:not([stroke="none"]){stroke:${color}!important}`;
+  doc.documentElement.insertBefore(tintStyle, doc.documentElement.firstChild);
+
+  // XMLSerializer a veces omite xmlns en el root; asegurar
+  let out=new XMLSerializer().serializeToString(doc);
+  if(!/\sxmlns=/.test(out.slice(0,200))){
+    out=out.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  return out;
+}
+/** Fallback sin DOM (p.ej. diagnóstico en Node). */
+function applySvgStrokeColorRegex(svgText, color){
+  let t=fixSvgXmlns(String(svgText||""));
+  t=t.replace(/<style[^>]*\bid=["']cx-outline-tint["'][^>]*>[\s\S]*?<\/style>/gi,"");
+  t=tintCssText(t, color);
   t=t.replace(/\bstroke=(["'])(?!none\1)[^"']*\1/gi, `stroke="${color}"`);
-  // Atributos fill="#oscuro"
   t=t.replace(/\bfill=(["'])(#[0-9a-fA-F]{3,8})\1/gi, (m, q, hex)=> isOutlineFillHex(hex) ? `fill="${color}"` : m);
   t=t.replace(/\bfill=(["'])black\1/gi, `fill="${color}"`);
-
-  // Estilo embebido: grupo #outline (SVG Repo) y el mismo id tras uniquify (n12-outline)
-  const tintCss=`<style id="cx-outline-tint">
-#outline path,#outline polygon,#outline circle,#outline ellipse,#outline rect,#outline polyline,
-[id="outline"] path,[id="outline"] polygon,[id="outline"] circle,[id="outline"] ellipse,[id="outline"] rect,[id="outline"] polyline,
-[id$="-outline"] path,[id$="-outline"] polygon,[id$="-outline"] circle,[id$="-outline"] ellipse,[id$="-outline"] rect,[id$="-outline"] polyline{fill:${color}!important;stroke:${color}!important}
-[stroke]:not([stroke="none"]){stroke:${color}!important}
-</style>`;
+  t=t.replace(/<g\b([^>]*\bid=(["'])(?:[^"']*-)?outline\2[^>]*)>([\s\S]*?)<\/g>/gi, (full, gAttrs, _q, inner)=>{
+    const baked=inner.replace(/<(path|polygon|circle|ellipse|rect|polyline)\b([^>]*?)(\/?)>/gi, (all, tag, attrs, self)=>{
+      let a=attrs.replace(/\sfill=(["'])[^"']*\1/gi,"").replace(/\sclass=(["'])[^"']*\1/gi,"");
+      return `<${tag}${a} fill="${color}"${self}>`;
+    });
+    return `<g${gAttrs}>${baked}</g>`;
+  });
+  t=t.replace(/<(path|polygon|circle|ellipse|rect|polyline)\b([^>]*\bclass=(["'])([^"']*\bst5\b[^"']*)\3[^>]*?)(\/?)>/gi,
+    (all, tag, attrs, q, cls, self)=>{
+      let a=attrs.replace(/\sfill=(["'])[^"']*\1/gi,"").replace(/\sclass=(["'])[^"']*\1/gi,"");
+      const rest=cls.replace(/\bst5\b/g,"").trim().replace(/\s+/g," ");
+      if(rest) a+=` class="${rest}"`;
+      return `<${tag}${a} fill="${color}"${self}>`;
+    });
+  const tintCss=`<style id="cx-outline-tint">.st5{fill:${color}!important}.st3,.st4{stroke:${color}!important}#outline path,[id$="-outline"] path{fill:${color}!important}[stroke]:not([stroke="none"]){stroke:${color}!important}</style>`;
   if(/<svg\b[^>]*>/i.test(t)) t=t.replace(/<svg\b[^>]*>/i, m=>m+tintCss);
   else t=tintCss+t;
   return t;
 }
-const svgStrokeTintCache={};
-function tintedSvgUrl(src, strokeColor){
-  if(!strokeColor || !isSvgDataUrl(src)) return src;
-  const key=src+"\0"+strokeColor;
-  if(svgStrokeTintCache[key]) return svgStrokeTintCache[key];
-  const text=applySvgStrokeColor(fixSvgXmlns(decodeSvgDataUrl(src)), strokeColor);
-  const url="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(text);
-  svgStrokeTintCache[key]=url;
+/**
+ * Caché de tint por nodo: Blob URL (no data-URL).
+ * Clave estable: nodeId + color + longitud del src (el XML tintado se deriva del original).
+ */
+const svgTintBlobCache=new Map(); // nodeId -> {color, srcLen, url, xml}
+function revokeTintBlob(entry){
+  if(entry && entry.url && entry.url.startsWith("blob:")){
+    try{ URL.revokeObjectURL(entry.url); }catch(e){}
+  }
+}
+function clearSvgStrokeTintCache(){
+  for(const entry of svgTintBlobCache.values()) revokeTintBlob(entry);
+  svgTintBlobCache.clear();
+}
+function invalidateNodeTint(n){
+  if(!n) return;
+  const entry=svgTintBlobCache.get(n.id);
+  if(entry){ revokeTintBlob(entry); svgTintBlobCache.delete(n.id); }
+}
+function buildTintedSvgXml(src, strokeColor){
+  if(!strokeColor || !isSvgDataUrl(src)) return null;
+  return applySvgStrokeColor(fixSvgXmlns(decodeSvgDataUrl(src)), strokeColor);
+}
+function tintedSvgUrlForNode(n){
+  if(!n || !n.img || !n.strokeColor || !isSvgDataUrl(n.img)) return n && n.img || "";
+  const color=n.strokeColor;
+  const srcLen=n.img.length;
+  const prev=svgTintBlobCache.get(n.id);
+  if(prev && prev.color===color && prev.srcLen===srcLen && prev.url) return prev.url;
+  if(prev) revokeTintBlob(prev);
+  const xml=buildTintedSvgXml(n.img, color);
+  if(!xml) return n.img;
+  const url=URL.createObjectURL(new Blob([xml], {type:"image/svg+xml;charset=utf-8"}));
+  svgTintBlobCache.set(n.id, {color, srcLen, url, xml});
   return url;
 }
 function nodeImageSrc(n){
   if(!n || !n.img) return "";
-  return tintedSvgUrl(n.img, n.strokeColor||null);
+  if(!n.strokeColor || !isSvgDataUrl(n.img)) return n.img;
+  return tintedSvgUrlForNode(n);
+}
+/** XML ya tintado (export SVG); null si no aplica. */
+function nodeTintedSvgXml(n){
+  if(!n || !n.img || !n.strokeColor || !isSvgDataUrl(n.img)) return null;
+  const prev=svgTintBlobCache.get(n.id);
+  if(prev && prev.color===n.strokeColor && prev.srcLen===n.img.length && prev.xml) return prev.xml;
+  return buildTintedSvgXml(n.img, n.strokeColor);
+}
+function ensureImgLoaded(src){
+  if(!src) return Promise.resolve();
+  const im=getImg(src);
+  // complete + naturalWidth 0 = error ya disparado: no esperar eventos que no volverán
+  if(im.complete) return Promise.resolve();
+  return new Promise(res=>{
+    const done=()=>res();
+    im.addEventListener("load", done, {once:true});
+    im.addEventListener("error", done, {once:true});
+  });
+}
+async function ensureExportImages(){
+  const jobs=[];
+  for(const n of P().nodes||[]){
+    if(n.shape==="image" && n.img) jobs.push(ensureImgLoaded(nodeImageSrc(n)));
+    if(n.shape==="icon" && n.icon) jobs.push(ensureImgLoaded(iconURL[n.icon]||""));
+  }
+  await Promise.all(jobs);
 }
 function nodeIsSvgImage(n){
   return n && n.shape==="image" && isSvgDataUrl(n.img);
@@ -882,6 +996,7 @@ function dupSel(){ const keep=clip; copySel(); pasteClip(); clip=keep; }
 function deleteSel(){
   if(!selN.size && !selE.size) return;
   pushUndo();
+  selN.forEach(id=>{ const n=nodeById(id); if(n) invalidateNodeTint(n); });
   P().edges=P().edges.filter(e=>!selE.has(e.id) && !selN.has(e.from) && !selN.has(e.to));
   P().nodes=P().nodes.filter(n=>!selN.has(n.id));
   clearSel();
@@ -892,6 +1007,7 @@ let undoStack=[], redoStack=[], lblDirty=false, fsDirty=false;
 function snapPage(){ return {pi:doc.cur, data:deep({nodes:P().nodes, edges:P().edges, nextId:P().nextId})}; }
 function pushUndo(){ undoStack.push(snapPage()); if(undoStack.length>60) undoStack.shift(); redoStack.length=0; scheduleAutosave(); }
 function applySnap(s){
+  clearSvgStrokeTintCache();
   doc.cur=clamp(s.pi,0,doc.pages.length-1);
   const pg=P(); pg.nodes=deep(s.data.nodes); pg.edges=deep(s.data.edges); pg.nextId=s.data.nextId;
   clearSel(); renderTabs();
@@ -949,6 +1065,7 @@ function syncProjectControls(){
 }
 function applyProjectData(d, opts={}){
   runWithoutAutosave(()=>{
+    clearSvgStrokeTintCache();
     if(d.doc&&Array.isArray(d.doc.pages)) doc=d.doc;
     else if(d.state&&Array.isArray(d.state.nodes)){
       doc={theme:d.state.theme||"dark", cur:0,
@@ -1979,9 +2096,19 @@ function buildImgStrokeSwatches(){
       let any=false;
       selN.forEach(id=>{
         const n=nodeById(id);
-        if(n && nodeIsSvgImage(n)){ n.strokeColor=color||null; any=true; }
+        if(n && nodeIsSvgImage(n)){
+          invalidateNodeTint(n);
+          n.strokeColor=color||null;
+          any=true;
+          const url=nodeImageSrc(n);
+          delete imgCache[url];
+          getImg(url); // precarga Blob URL tintado
+        }
       });
-      if(any){ refreshPanel(); scheduleAutosave(); }
+      if(any){
+        refreshPanel();
+        scheduleAutosave();
+      }
     };
     cont.appendChild(d);
   };
@@ -2375,8 +2502,6 @@ function uniquifySvgIds(markup, prefix){
 function inlineSvgAt(svgText, x, y, w, h, opts={}){
   let xml=fixSvgXmlns(String(svgText||"")).trim();
   xml=xml.replace(/<\?xml[\s\S]*?\?>/i,"").replace(/<!DOCTYPE[\s\S]*?>/i,"").trim();
-  // Tint sobre el original (antes de uniquify) para reescribir .st5 / strokes
-  if(opts.strokeColor) xml=applySvgStrokeColor(xml, opts.strokeColor);
   const open=xml.match(/<svg\b[^>]*>/i);
   const closeIdx=xml.toLowerCase().lastIndexOf("</svg>");
   if(!open || closeIdx<0) return "";
@@ -2390,9 +2515,12 @@ function inlineSvgAt(svgText, x, y, w, h, opts={}){
     viewBox=`0 0 ${wm?wm[1]:64} ${hm?hm[1]:64}`;
   }
   if(opts.idPrefix) inner=uniquifySvgIds(inner, opts.idPrefix);
-  // Re-tint tras uniquify: los selectores #outline ya fueron renombrados en <style>
+  // Tint DESPUÉS del rename de ids, bakeando fill en atributos
   if(opts.strokeColor){
-    const wrapped=applySvgStrokeColor(`<svg xmlns="http://www.w3.org/2000/svg">${inner}</svg>`, opts.strokeColor);
+    const wrapped=applySvgStrokeColor(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${escapeAttribute(viewBox)}">${inner}</svg>`,
+      opts.strokeColor
+    );
     const o2=wrapped.match(/<svg\b[^>]*>/i);
     const c2=wrapped.toLowerCase().lastIndexOf("</svg>");
     if(o2 && c2>0) inner=wrapped.slice(o2.index+o2[0].length, c2);
@@ -2573,13 +2701,14 @@ $("btnExport").onclick=()=>{
 $("exCancel").onclick=()=>exModal.style.display="none";
 function slug(){ return (P().name||"diagrama").toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi,"-"); }
 
-$("exGo").onclick=()=>{
+$("exGo").onclick=async ()=>{
   const fmt=$("exFmt").value, scale=+$("exRes").value;
   const transparent=$("exTr").checked;
   const playOnce=$("exOnce").checked;
   const areaMode=exportAreaMode();
   exModal.style.display="none";
   if(P().nodes.length===0){ alert("La página está vacía."); return; }
+  try{ await ensureExportImages(); }catch(e){}
   if(fmt==="apng") exportAPNG(scale, transparent, playOnce, areaMode);
   else if(fmt==="gif") exportGIF(scale, transparent, playOnce, areaMode);
   else if(fmt==="svg") exportSVG(scale, transparent, areaMode);
@@ -2637,7 +2766,7 @@ async function ensureUPNG(){
   if(window.UPNG && window.UPNG.__cxAdgVendor) return;
   await new Promise((resolve,reject)=>{
     const s=document.createElement("script");
-    s.src="./vendor/UPNG.js?v=28";
+    s.src="./vendor/UPNG.js?v=30";
     s.async=true;
     s.onload=()=>{
       if(!window.UPNG||typeof window.UPNG.encode!=="function"){
@@ -2949,7 +3078,7 @@ async function exportGIF(scale, transparent, playOnce, areaMode="content"){
 
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator)) return;
-  const register=()=> navigator.serviceWorker.register("./sw.js?v=28").catch(console.error);
+  const register=()=> navigator.serviceWorker.register("./sw.js?v=31").catch(console.error);
   if(document.readyState==="complete") register();
   else window.addEventListener("load", register, {once:true});
 }

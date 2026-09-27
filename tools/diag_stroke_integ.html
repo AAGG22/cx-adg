@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>integ</title>
+<iframe id="f" src="../index.html" style="width:1200px;height:800px;border:0"></iframe>
+<pre id="out" style="position:fixed;left:0;top:0;z-index:9;background:#000;color:#0f0;font:11px monospace;max-width:480px;max-height:100vh;overflow:auto;padding:8px"></pre>
+<script>
+const out=document.getElementById("out");
+const log=s=>{ out.textContent+=s+"\n"; console.log(s); };
+
+async function waitTitle(win, pred, ms=15000){
+  const t0=Date.now();
+  while(Date.now()-t0<ms){
+    try{ if(pred(win)) return true; }catch(e){}
+    await new Promise(r=>setTimeout(r,100));
+  }
+  return false;
+}
+
+async function main(){
+  const f=document.getElementById("f");
+  await new Promise(r=> f.onload=r);
+  const w=f.contentWindow;
+  // dismiss autosave modal if any
+  await new Promise(r=>setTimeout(r,800));
+  try{
+    const m=w.document.getElementById("autosaveModal");
+    if(m && m.style.display!=="none"){
+      const discard=w.document.getElementById("autosaveDiscard");
+      if(discard) discard.click();
+      await new Promise(r=>setTimeout(r,300));
+    }
+  }catch(e){ log("autosave dismiss err "+e); }
+
+  // Wait for CUSTOM_SVGS load
+  await new Promise(r=>setTimeout(r,1500));
+
+  // Access app internals — they're in global scope of index.html script
+  const has=k=>typeof w[k]!=="undefined";
+  log("has applySvgStrokeColor="+has("applySvgStrokeColor"));
+  log("has nodeImageSrc="+has("nodeImageSrc"));
+  log("has P="+has("P"));
+  log("has doc="+has("doc"));
+
+  if(!has("applySvgStrokeColor") || !has("P")){
+    // Maybe scripts are module/scoped? Check
+    log("KEYS sample: "+Object.keys(w).filter(k=>/svg|Svg|stroke|node|doc|PALETTE/.test(k)).slice(0,40).join(","));
+    log("FAIL no globals");
+    document.title="INTEG_FAIL";
+    return;
+  }
+
+  // Clear page and add battery SVG like the drawer does
+  const svgText = await (await fetch("../svg/bateria1.svg")).text();
+  const fixed = w.fixSvgXmlns(svgText);
+  const dataUrl = "data:image/svg+xml;charset=utf-8,"+encodeURIComponent(fixed);
+
+  // blank page
+  w.P().nodes.length=0;
+  w.P().edges.length=0;
+  const n=w.newNode("image", 400, 300, {img:dataUrl, label:"", w:200, h:200});
+  w.selectOnly("node", n.id);
+  log("node id="+n.id+" isSvg="+w.nodeIsSvgImage(n));
+  log("rowImgStroke display="+w.document.getElementById("rowImgStroke").style.display);
+
+  // Force a render frame
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+
+  // Sample canvas around node before tint
+  function sampleInk(){
+    const cv=w.document.getElementById("cv");
+    const c=cv.getContext("2d");
+    // convert world to screen: screen = world*viewZoom + viewX
+    const sx = n.x * w.viewZoom + w.viewX;
+    const sy = n.y * w.viewZoom + w.viewY;
+    const half = (n.w/2)*w.viewZoom;
+    let white=0, dark=0, other=0;
+    for(let dy=-half; dy<=half; dy+=4){
+      for(let dx=-half; dx<=half; dx+=4){
+        const x=Math.round(sx+dx), y=Math.round(sy+dy);
+        if(x<0||y<0||x>=cv.width||y>=cv.height) continue;
+        const d=c.getImageData(x,y,1,1).data;
+        if(d[3]<128) continue;
+        const lum=0.299*d[0]+0.587*d[1]+0.114*d[2];
+        if(lum>230) white++;
+        else if(lum<80) dark++;
+        else other++;
+      }
+    }
+    return {white, dark, other, sx:sx|0, sy:sy|0};
+  }
+
+  // ensure image loaded
+  await w.ensureImgLoaded(w.nodeImageSrc(n));
+  // kick render
+  if(typeof w.render==="function"){
+    const cv=w.document.getElementById("cv");
+    w.render(cv.getContext("2d"), 0);
+  }
+  await new Promise(r=>setTimeout(r,200));
+  const before=sampleInk();
+  log("BEFORE "+JSON.stringify(before));
+
+  // Simulate swatch click: set white
+  n.strokeColor="#ffffff";
+  w.clearSvgStrokeTintCache();
+  const url=w.nodeImageSrc(n);
+  log("tinted url prefix="+url.slice(0,40)+" len="+url.length);
+  log("same as orig? "+(url===dataUrl));
+  delete w.imgCache[url];
+  w.getImg(url);
+  await w.ensureImgLoaded(url);
+  {
+    const cv=w.document.getElementById("cv");
+    w.render(cv.getContext("2d"), 0);
+  }
+  await new Promise(r=>setTimeout(r,200));
+  const after=sampleInk();
+  log("AFTER "+JSON.stringify(after));
+
+  // Also check export SVG string
+  const svgOut = w.renderImageToSVG(n);
+  const hasWhite = /fill="#ffffff"/i.test(svgOut);
+  const has222 = /#222222/.test(svgOut);
+  log("export has fill#ffffff="+hasWhite+" still#222="+has222);
+  log("export snippet="+svgOut.slice(0,300).replace(/\s+/g," "));
+
+  const ok = after.white > before.white && after.white > 10;
+  log(ok ? "PASS canvas tinted white" : "FAIL canvas still not white");
+  document.title = ok ? "INTEG_PASS" : "INTEG_FAIL";
+}
+main().catch(e=>{ log(String(e.stack||e)); document.title="INTEG_ERR"; });
+</script>

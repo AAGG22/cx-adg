@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>diag stroke tint</title>
+<body style="margin:0;background:#12151c">
+<canvas id="c0" width="200" height="200"></canvas>
+<canvas id="c1" width="200" height="200"></canvas>
+<pre id="out" style="color:#fff;font:12px monospace;padding:8px"></pre>
+<script>
+async function main(){
+  const out = document.getElementById("out");
+  const log = (s)=>{ out.textContent += s + "\n"; console.log(s); };
+  const svgText = await (await fetch("../svg/bateria1.svg")).text();
+
+  function expandHexColor(hex){
+    let h=String(hex||"").replace(/^#/,"");
+    if(h.length===3) h=h.split("").map(c=>c+c).join("");
+    if(h.length===8) h=h.slice(0,6);
+    return h.length===6 ? h.toLowerCase() : null;
+  }
+  function isOutlineFillHex(hex){
+    const h=expandHexColor(hex);
+    if(!h) return false;
+    const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+    const lum=(0.299*r+0.587*g+0.114*b)/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    const sat=max===0?0:(max-min)/max;
+    return lum<0.38 && (sat<0.45 || lum<0.18);
+  }
+  function fixSvgXmlns(text){
+    return String(text||"").replace(/xmlns=(["'])https?:\/\/w3\.org\1/gi,'xmlns="http://www.w3.org/2000/svg"');
+  }
+  function tintCssText(css, color){
+    let t=String(css||"");
+    t=t.replace(/stroke\s*:\s*#[0-9a-fA-F]{3,8}\b/g, `stroke:${color}`);
+    t=t.replace(/fill\s*:\s*(#[0-9a-fA-F]{3,8})\b/gi, (m, hex)=> isOutlineFillHex(hex) ? `fill:${color}` : m);
+    t=t.replace(/fill\s*:\s*#000\b/gi, `fill:${color}`);
+    t=t.replace(/fill\s*:\s*black\b/gi, `fill:${color}`);
+    return t;
+  }
+  function applySvgStrokeColor(svgText, color){
+    const raw=fixSvgXmlns(String(svgText||""));
+    const doc=new DOMParser().parseFromString(raw, "image/svg+xml");
+    if(doc.querySelector("parsererror")) throw new Error("parse fail");
+    doc.querySelectorAll("style").forEach(st=>{ st.textContent=tintCssText(st.textContent, color); });
+    const bake=el=>{ el.removeAttribute("class"); el.setAttribute("fill", color); };
+    doc.querySelectorAll("[id]").forEach(g=>{
+      const id=g.getAttribute("id")||"";
+      if(id==="outline" || /(^|-)outline$/i.test(id)){
+        g.querySelectorAll("path,polygon,circle,ellipse,rect,polyline").forEach(bake);
+      }
+    });
+    doc.querySelectorAll(".st5").forEach(bake);
+    const tintStyle=doc.createElementNS("http://www.w3.org/2000/svg", "style");
+    tintStyle.setAttribute("id", "cx-outline-tint");
+    tintStyle.textContent=`#outline path,[id$="-outline"] path{fill:${color}!important}.st5{fill:${color}!important}`;
+    doc.documentElement.insertBefore(tintStyle, doc.documentElement.firstChild);
+    return new XMLSerializer().serializeToString(doc);
+  }
+
+  function loadAndSample(url, canvasId){
+    return new Promise((resolve)=>{
+      const im=new Image();
+      im.onload=()=>{
+        const cv=document.getElementById(canvasId);
+        const c=cv.getContext("2d");
+        c.fillStyle="#12151c"; c.fillRect(0,0,200,200);
+        c.drawImage(im,0,0,200,200);
+        let dark=null, light=null, nInk=0;
+        for(let y=0;y<200;y+=2) for(let x=0;x<200;x+=2){
+          const d=c.getImageData(x,y,1,1).data;
+          if(d[3]<200) continue;
+          if(d[0]<40&&d[1]<40&&d[2]<50) continue;
+          nInk++;
+          const lum=0.299*d[0]+0.587*d[1]+0.114*d[2];
+          if(!dark || lum<dark.lum) dark={r:d[0],g:d[1],b:d[2],lum};
+          if(!light || lum>light.lum) light={r:d[0],g:d[1],b:d[2],lum};
+        }
+        resolve({ok:true, nInk, dark, light});
+      };
+      im.onerror=()=>resolve({ok:false});
+      im.src=url;
+    });
+  }
+
+  const origUrl="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(fixSvgXmlns(svgText));
+  const tintedXml=applySvgStrokeColor(svgText,"#ffffff");
+  const blobUrl=URL.createObjectURL(new Blob([tintedXml],{type:"image/svg+xml;charset=utf-8"}));
+  log("outline fill? "+/id="outline"[\s\S]{0,400}fill="#ffffff"/i.test(tintedXml));
+  const a=await loadAndSample(origUrl,"c0");
+  log("ORIG "+JSON.stringify(a));
+  const b=await loadAndSample(blobUrl,"c1");
+  log("BLOB "+JSON.stringify(b));
+  const pass=b.ok && b.light && b.light.lum>200;
+  log(pass?"PASS":"FAIL");
+  document.title=pass?"DIAG_DONE":"DIAG_FAIL";
+}
+main().catch(e=>{ document.getElementById("out").textContent=String(e); document.title="DIAG_ERR"; });
+</script>
+</body>

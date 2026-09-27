@@ -22,24 +22,26 @@ Igual que **Color del texto**:
 }
 ```
 
-`strokeColor: null` o ausente = original.
+`strokeColor: null` o ausente = original. El `img` **siempre** guarda el SVG original (nunca un blob tintado).
 
-## Cómo funciona
+## Cómo funciona (pipeline único)
 
 1. Solo aplica a nodos `image` cuyo `img` es un data URL SVG.
-2. Recolorea:
-   - **`stroke`** en CSS y atributos
-   - **`fill` oscuros** de line-art (p. ej. `#222222` en `#outline` de SVG Repo)
-   - Un `<style id="cx-outline-tint">` embebido como refuerzo
-3. No toca fills de color (rojo, verde, etc.).
-4. El resultado se cachea y se usa en canvas y export SVG.
+2. `applySvgStrokeColor` (DOMParser) es la **única** fuente de verdad:
+   - Reescribe CSS (`stroke`, fills oscuros tipo `#222222`)
+   - Hornea `fill` en `#outline` / `*-outline` y quita clases (`.st5`) para que el CSS no pise el color
+   - Inserta `<style id="cx-outline-tint">` de refuerzo
+3. **Canvas:** el XML tintado se sirve como **Blob URL** cacheado por `nodeId` (no data-URL gigante). Al cambiar el color se revoca el blob anterior.
+4. **Export SVG:** mismo `applySvgStrokeColor`, aplicado **después** de uniquificar ids (`n7-outline`, etc.).
+5. No toca fills de color vivos (rojo, verde, etc.).
 
 ## Caso `bateria1.svg`
 
-Ese icono dibuja el contorno con **`fill:#222222`** en el grupo `#outline`, no con `stroke` (los strokes están en capas `display:none`). Por eso hace falta tintar fills oscuros, no solo strokes.
+Ese icono dibuja el contorno con **`fill:#222222`** en el grupo `#outline` (clase `.st5`), no con `stroke` (los strokes están en capas `display:none`). Por eso hace falta tintar fills oscuros y hornear el atributo, no solo strokes.
 
 ## Uso
 
 1. Insertá un SVG (Iconos → Proyecto, o Imagen).
 2. Seleccionálo.
 3. Elegí un swatch en **Color de contorno (SVG)**.
+4. Si no ves el cambio: **Ctrl+Shift+R** (el service worker debe ser ≥ v31; el HTML va network-first).
