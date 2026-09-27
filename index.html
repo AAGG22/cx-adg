@@ -372,6 +372,13 @@
     <div class="row" id="exRowFps"><label>FPS</label>
       <select id="exFps"><option>15</option><option selected>20</option><option>25</option></select>
     </div>
+    <div class="row" id="exRowApngQ"><label>APNG calidad</label>
+      <select id="exApngQ">
+        <option value="fluid" selected>Fluidez (más fps)</option>
+        <option value="balance">Equilibrio</option>
+        <option value="sharp">Nitidez (más px)</option>
+      </select>
+    </div>
     <div class="row" id="exRowDur"><label>Duración (s)</label><input type="number" id="exDur" min="1" max="30" step="0.5" value="3"></div>
     <div class="row" id="exRowOnce"><label>No repetir animación</label><input type="checkbox" id="exOnce"></div>
     <p class="hint" id="exHint">APNG usa transparencia real (sin parpadeo negro). GIF es más compatible; su transparencia es de 1 bit.</p>
@@ -2311,15 +2318,65 @@ function hexPointsSVG(n){
     [x+w/2-i,y+h/2],[x-w/2+i,y+h/2],[x-w/2,y]
   ].map(p=>p.map(v=>v.toFixed(2)).join(",")).join(" ");
 }
+function escapeRegExp(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }
+/** Prefija ids internos para que varios iconos en el mismo SVG no choquen. */
+function uniquifySvgIds(markup, prefix){
+  const ids=new Set();
+  String(markup).replace(/\bid\s*=\s*["']([^"']+)["']/gi,(_,id)=>ids.add(id));
+  let out=String(markup);
+  for(const id of ids){
+    const nid=prefix+id;
+    const reId=new RegExp(`\\bid=(["'])${escapeRegExp(id)}\\1`,"g");
+    out=out.replace(reId,`id=$1${nid}$1`);
+    out=out.replace(new RegExp(`url\\(\\s*#${escapeRegExp(id)}\\s*\\)`,"g"),`url(#${nid})`);
+    out=out.replace(new RegExp(`(href|xlink:href)=(["'])#${escapeRegExp(id)}\\2`,"gi"),`$1=$2#${nid}$2`);
+  }
+  return out;
+}
+/**
+ * Incrusta un SVG como nodo anidado (no <image href="data:…">).
+ * Los data-URL de SVG dentro de <image> fallan en muchos visores / al abrir el .svg.
+ */
+function inlineSvgAt(svgText, x, y, w, h, opts={}){
+  let xml=fixSvgXmlns(String(svgText||"")).trim();
+  xml=xml.replace(/<\?xml[\s\S]*?\?>/i,"").replace(/<!DOCTYPE[\s\S]*?>/i,"").trim();
+  const open=xml.match(/<svg\b[^>]*>/i);
+  const closeIdx=xml.toLowerCase().lastIndexOf("</svg>");
+  if(!open || closeIdx<0) return "";
+  const openTag=open[0];
+  let inner=xml.slice(open.index+openTag.length, closeIdx);
+  const vbM=openTag.match(/\bviewBox\s*=\s*["']([^"']+)["']/i);
+  let viewBox=vbM?vbM[1]:null;
+  if(!viewBox){
+    const wm=openTag.match(/\bwidth\s*=\s*["']([0-9.]+)/i);
+    const hm=openTag.match(/\bheight\s*=\s*["']([0-9.]+)/i);
+    viewBox=`0 0 ${wm?wm[1]:64} ${hm?hm[1]:64}`;
+  }
+  if(opts.idPrefix) inner=uniquifySvgIds(inner, opts.idPrefix);
+  const svgInner=`<svg xmlns="http://www.w3.org/2000/svg" width="${(+w).toFixed(2)}" height="${(+h).toFixed(2)}" viewBox="${escapeAttribute(viewBox)}" preserveAspectRatio="xMidYMid meet" overflow="visible">${inner}</svg>`;
+  if(opts.flipH){
+    return `<g transform="translate(${(x+w).toFixed(2)} ${(+y).toFixed(2)}) scale(-1 1)">${svgInner}</g>`;
+  }
+  return `<g transform="translate(${(+x).toFixed(2)} ${(+y).toFixed(2)})">${svgInner}</g>`;
+}
+function rasterImageToSVG(src, x, y, w, h, flipH){
+  // Escapar solo comillas: & en data-URL base64 no aparece; &amp; rompe algunos visores
+  const safe=String(src).replaceAll("&","&amp;").replaceAll('"',"&quot;");
+  const attrs=`width="${(+w).toFixed(2)}" height="${(+h).toFixed(2)}" href="${safe}" xlink:href="${safe}" preserveAspectRatio="xMidYMid meet"`;
+  if(flipH){
+    return `<image x="${(-w/2).toFixed(2)}" y="0" ${attrs} transform="translate(${(x+w/2).toFixed(2)} ${(+y).toFixed(2)}) scale(-1 1)"/>`;
+  }
+  return `<image x="${(+x).toFixed(2)}" y="${(+y).toFixed(2)}" ${attrs}/>`;
+}
 function renderImageToSVG(n){
   const src=nodeImageSrc(n);
   if(!src) return "";
   const x=n.x-n.w/2, y=n.y-n.h/2;
-  if(n.flipH){
-    // Espejo horizontal alrededor del centro del nodo
-    return `<image x="${(-n.w/2).toFixed(2)}" y="${(n.y-n.h/2).toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(src)}" transform="translate(${n.x.toFixed(2)} 0) scale(-1 1)" preserveAspectRatio="xMidYMid meet"/>`;
+  if(isSvgDataUrl(src)){
+    const xml=decodeSvgDataUrl(src);
+    return inlineSvgAt(xml, x, y, n.w, n.h, {flipH:!!n.flipH, idPrefix:`n${n.id}-`});
   }
-  return `<image x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${n.w}" height="${n.h}" href="${escapeAttribute(src)}" preserveAspectRatio="xMidYMid meet"/>`;
+  return rasterImageToSVG(src, x, y, n.w, n.h, !!n.flipH);
 }
 function renderNodeToSVG(n, theme){
   const outline=nodeRectOutline(n);
@@ -2351,9 +2408,10 @@ function renderNodeToSVG(n, theme){
       parts.push(svgLabelLines(n,theme,22,n.y));
       break;
     case "icon":{
-      const src=iconURL[n.icon]||"";
+      const raw=ICONS[n.icon]&&ICONS[n.icon].svg;
       const s=Math.min(n.w,n.h-26)*.78;
-      if(src) parts.push(`<image x="${(n.x-s/2).toFixed(2)}" y="${(n.y-n.h/2+4).toFixed(2)}" width="${s.toFixed(2)}" height="${s.toFixed(2)}" href="${escapeAttribute(src)}" preserveAspectRatio="xMidYMid meet"/>`);
+      const ix=n.x-s/2, iy=n.y-n.h/2+4;
+      if(raw) parts.push(inlineSvgAt(raw, ix, iy, s, s, {idPrefix:`ico${n.id}-`}));
       parts.push(svgLabelLines(n,theme,14,n.y+n.h/2-10));
       break;
     }
@@ -2435,11 +2493,12 @@ function syncExportRows(){
   const anim=f==="gif"||f==="apng";
   $("exRowTr").style.display = (f==="png"||f==="gif"||f==="apng"||f==="svg") ? "flex":"none";
   $("exRowFps").style.display = anim ? "flex":"none";
+  $("exRowApngQ").style.display = f==="apng" ? "flex":"none";
   $("exRowDur").style.display = anim ? "flex":"none";
   $("exRowOnce").style.display = anim ? "flex":"none";
   $("exHint").style.display = (anim||f==="svg") ? "block":"none";
   if(f==="svg") $("exHint").textContent="SVG exporta el área 2560×1440. Con fondo transparente no se incluyen el color de fondo, la cuadrícula ni el marco punteado.";
-  else if(f==="apng") $("exHint").textContent="APNG sin pérdida de color (lossless). "+exportDurationExplain()+" Para que se vea como en el editor: dejá fondo transparente OFF (conserva el fondo del tema). Con transparencia, textos claros se pierden sobre fondos claros del navegador.";
+  else if(f==="apng") $("exHint").textContent="APNG lossless. "+exportDurationExplain()+" Calidad: Fluidez = más fotogramas (menos trabado); Nitidez = más resolución. Fondo transparente OFF para verse como en el editor.";
   else if(f==="gif") $("exHint").textContent="GIF clásico (.gif). "+exportDurationExplain()+" Transparencia GIF es de 1 bit (para alpha limpio usá APNG).";
 }
 $("exFmt").onchange=()=>{
@@ -2520,7 +2579,7 @@ async function ensureUPNG(){
   if(window.UPNG && window.UPNG.__cxAdgVendor) return;
   await new Promise((resolve,reject)=>{
     const s=document.createElement("script");
-    s.src="./vendor/UPNG.js?v=24";
+    s.src="./vendor/UPNG.js?v=26";
     s.async=true;
     s.onload=()=>{
       if(!window.UPNG||typeof window.UPNG.encode!=="function"){
@@ -2544,70 +2603,76 @@ function animExportTiming(){
   return { fps, dur, exSpeed, frames:Math.round(dur*fps), delay:Math.round(1000/fps) };
 }
 /**
- * Prioridad: resolución alta (como el export “de antes”).
- * Orden: techo de lado largo → menos frames (delay más largo, misma duración)
- * → bajar fps → solo al final bajar de ~960px.
- * El encoder Photopea ya no trunca; alargar delay es seguro.
+ * mode: fluid | balance | sharp
+ * Fluidez: mantiene ~12–15 fps (delay corto); baja resolución si hace falta.
+ * Nitidez: pocos frames, delay largo, más píxeles.
+ * Siempre: frames×delay ≈ duración pedida.
  */
-function planApngExport(w, h, dur, fps){
-  const MAX_RAW=150*1024*1024;
-  const MIN_EDGE=960;
-  const MAX_EDGE=1920;
-  const MIN_FRAMES=24;
+function planApngExport(w, h, dur, fps, mode){
+  const q=mode==="sharp"?"sharp":(mode==="balance"?"balance":"fluid");
+  const cfg={
+    fluid:   { MAX_RAW:200*1024*1024, MAX_EDGE:1680, MIN_EDGE:720,  targetFps:12, minFps:12 },
+    balance: { MAX_RAW:170*1024*1024, MAX_EDGE:1760, MIN_EDGE:860,  targetFps:10, minFps:9  },
+    sharp:   { MAX_RAW:150*1024*1024, MAX_EDGE:1920, MIN_EDGE:960,  targetFps:8,  minFps:6  }
+  }[q];
   const targetDur=Math.max(0.5, +dur||1);
-  let useFps=Math.max(10, Math.min(20, +fps||20));
+  let useFps=Math.max(cfg.minFps, Math.min(cfg.targetFps, +fps||cfg.targetFps));
   let tw=Math.max(1, Math.round(w));
   let th=Math.max(1, Math.round(h));
 
   const long0=Math.max(tw, th);
-  if(long0>MAX_EDGE){
-    const s=MAX_EDGE/long0;
+  if(long0>cfg.MAX_EDGE){
+    const s=cfg.MAX_EDGE/long0;
     tw=Math.max(1, Math.round(tw*s));
     th=Math.max(1, Math.round(th*s));
   }
 
+  // Frames objetivo = duración × fps (fluidez); en sharp puede bajar después
   let frames=Math.max(1, Math.round(targetDur*useFps));
-  const fits=()=>tw*th*4*frames<=MAX_RAW;
+  const fits=()=>tw*th*4*frames<=cfg.MAX_RAW;
+  const minFrames=Math.max(16, Math.round(targetDur*cfg.minFps));
 
-  // 1) Menos frames, misma duración (delay más largo) — conserva nitidez
-  while(!fits() && frames>MIN_FRAMES){
-    frames=Math.max(MIN_FRAMES, Math.floor(frames*0.9));
-  }
-
-  // 2) Bajar fps objetivo (recalcula tope de frames)
-  while(!fits() && useFps>10){
-    useFps-=1;
-    frames=Math.min(frames, Math.max(MIN_FRAMES, Math.round(targetDur*useFps)));
-  }
-
-  // 3) Solo si sigue sin entrar: bajar resolución hasta ~960
-  while(!fits() && Math.max(tw,th)>MIN_EDGE){
-    const s=0.92;
-    let ntw=Math.max(1, Math.round(tw*s));
-    let nth=Math.max(1, Math.round(th*s));
-    if(Math.max(ntw,nth)<MIN_EDGE){
-      const s2=MIN_EDGE/Math.max(tw,th);
-      tw=Math.max(1, Math.round(tw*s2));
-      th=Math.max(1, Math.round(th*s2));
-      break;
+  if(q==="fluid"||q==="balance"){
+    // Primero bajar resolución para conservar fps
+    while(!fits() && Math.max(tw,th)>cfg.MIN_EDGE){
+      tw=Math.max(1, Math.round(tw*0.9));
+      th=Math.max(1, Math.round(th*0.9));
     }
-    tw=ntw; th=nth;
-  }
-
-  // 4) Último recurso bajo 960
-  while(!fits() && Math.max(tw,th)>480){
-    tw=Math.max(1, Math.round(tw*0.9));
-    th=Math.max(1, Math.round(th*0.9));
-  }
-  while(!fits() && frames>16){
-    frames=Math.max(16, Math.floor(frames*0.9));
+    while(!fits() && useFps>cfg.minFps){
+      useFps-=1;
+      frames=Math.max(1, Math.round(targetDur*useFps));
+    }
+    while(!fits() && Math.max(tw,th)>400){
+      tw=Math.max(1, Math.round(tw*0.9));
+      th=Math.max(1, Math.round(th*0.9));
+    }
+    while(!fits() && frames>minFrames){
+      frames=Math.max(minFrames, Math.floor(frames*0.92));
+    }
+  }else{
+    // sharp: priorizar píxeles
+    while(!fits() && frames>minFrames){
+      frames=Math.max(minFrames, Math.floor(frames*0.9));
+    }
+    while(!fits() && useFps>cfg.minFps){
+      useFps-=1;
+      frames=Math.min(frames, Math.max(minFrames, Math.round(targetDur*useFps)));
+    }
+    while(!fits() && Math.max(tw,th)>cfg.MIN_EDGE){
+      tw=Math.max(1, Math.round(tw*0.92));
+      th=Math.max(1, Math.round(th*0.92));
+    }
+    while(!fits() && Math.max(tw,th)>480){
+      tw=Math.max(1, Math.round(tw*0.9));
+      th=Math.max(1, Math.round(th*0.9));
+    }
   }
 
   const delay=Math.max(20, Math.round((targetDur*1000)/frames));
   const playSec=frames*delay/1000;
 
   return {
-    w:tw, h:th, frames, delay, fps:useFps,
+    w:tw, h:th, frames, delay, fps:useFps, mode:q,
     playSec, dur:targetDur,
     rawMB:Math.round(tw*th*4*frames/1024/1024)
   };
@@ -2682,12 +2747,14 @@ async function exportAPNG(scale, transparent, playOnce){
     await ensureUPNG();
     const b=getBounds();
     let w=Math.round(b.w*scale), h=Math.round(b.h*scale);
-    const plan=planApngExport(w, h, dur, timing.fps);
+    const apngQ=($("exApngQ")&&$("exApngQ").value)||"fluid";
+    const plan=planApngExport(w, h, dur, timing.fps, apngQ);
     const fit=Math.min(plan.w/Math.max(1,w), plan.h/Math.max(1,h));
     w=plan.w; h=plan.h;
     const frames=plan.frames, delay=plan.delay;
     const renderScale=scale*fit;
-    msg.textContent=`${w}×${h} · ${frames} frames · ${delay} ms → ${plan.playSec.toFixed(1)}s`;
+    const effFps=(frames/Math.max(0.001,plan.playSec)).toFixed(1);
+    msg.textContent=`${w}×${h} · ${frames} frames · ~${effFps} fps · ${delay} ms → ${plan.playSec.toFixed(1)}s`;
     await new Promise(r=>setTimeout(r, 40));
     const off=document.createElement("canvas"); off.width=w; off.height=h;
     const oc=off.getContext("2d",{willReadFrequently:true});
@@ -2824,7 +2891,7 @@ async function exportGIF(scale, transparent, playOnce){
 
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator)) return;
-  const register=()=> navigator.serviceWorker.register("./sw.js?v=24").catch(console.error);
+  const register=()=> navigator.serviceWorker.register("./sw.js?v=26").catch(console.error);
   if(document.readyState==="complete") register();
   else window.addEventListener("load", register, {once:true});
 }
