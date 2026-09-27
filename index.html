@@ -557,9 +557,11 @@ function applySvgStrokeColor(svgText, color){
   t=t.replace(/\bfill=(["'])(#[0-9a-fA-F]{3,8})\1/gi, (m, q, hex)=> isOutlineFillHex(hex) ? `fill="${color}"` : m);
   t=t.replace(/\bfill=(["'])black\1/gi, `fill="${color}"`);
 
-  // Estilo embebido: fuerza contorno en grupo #outline (SVG Repo) y strokes visibles
+  // Estilo embebido: grupo #outline (SVG Repo) y el mismo id tras uniquify (n12-outline)
   const tintCss=`<style id="cx-outline-tint">
-#outline path,#outline polygon,#outline circle,#outline ellipse,#outline rect,#outline polyline{fill:${color}!important;stroke:${color}!important}
+#outline path,#outline polygon,#outline circle,#outline ellipse,#outline rect,#outline polyline,
+[id="outline"] path,[id="outline"] polygon,[id="outline"] circle,[id="outline"] ellipse,[id="outline"] rect,[id="outline"] polyline,
+[id$="-outline"] path,[id$="-outline"] polygon,[id$="-outline"] circle,[id$="-outline"] ellipse,[id$="-outline"] rect,[id$="-outline"] polyline{fill:${color}!important;stroke:${color}!important}
 [stroke]:not([stroke="none"]){stroke:${color}!important}
 </style>`;
   if(/<svg\b[^>]*>/i.test(t)) t=t.replace(/<svg\b[^>]*>/i, m=>m+tintCss);
@@ -2350,11 +2352,20 @@ function uniquifySvgIds(markup, prefix){
   let out=String(markup);
   for(const id of ids){
     const nid=prefix+id;
-    const reId=new RegExp(`\\bid=(["'])${escapeRegExp(id)}\\1`,"g");
-    out=out.replace(reId,`id=$1${nid}$1`);
+    out=out.replace(new RegExp(`\\bid=(["'])${escapeRegExp(id)}\\1`,"g"),`id=$1${nid}$1`);
     out=out.replace(new RegExp(`url\\(\\s*#${escapeRegExp(id)}\\s*\\)`,"g"),`url(#${nid})`);
     out=out.replace(new RegExp(`(href|xlink:href)=(["'])#${escapeRegExp(id)}\\2`,"gi"),`$1=$2#${nid}$2`);
   }
+  // Selectores CSS #id dentro de <style> (si no, #outline deja de pintar tras el rename)
+  out=out.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, block=>{
+    let b=block;
+    for(const id of ids){
+      // Evitar ids que parecen hex cortos (#fff → fill)
+      if(/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(id)) continue;
+      b=b.replace(new RegExp(`#${escapeRegExp(id)}(?=[\\s.{:,\\[>+~]|$)`,"g"),`#${prefix}${id}`);
+    }
+    return b;
+  });
   return out;
 }
 /**
@@ -2364,6 +2375,8 @@ function uniquifySvgIds(markup, prefix){
 function inlineSvgAt(svgText, x, y, w, h, opts={}){
   let xml=fixSvgXmlns(String(svgText||"")).trim();
   xml=xml.replace(/<\?xml[\s\S]*?\?>/i,"").replace(/<!DOCTYPE[\s\S]*?>/i,"").trim();
+  // Tint sobre el original (antes de uniquify) para reescribir .st5 / strokes
+  if(opts.strokeColor) xml=applySvgStrokeColor(xml, opts.strokeColor);
   const open=xml.match(/<svg\b[^>]*>/i);
   const closeIdx=xml.toLowerCase().lastIndexOf("</svg>");
   if(!open || closeIdx<0) return "";
@@ -2377,6 +2390,13 @@ function inlineSvgAt(svgText, x, y, w, h, opts={}){
     viewBox=`0 0 ${wm?wm[1]:64} ${hm?hm[1]:64}`;
   }
   if(opts.idPrefix) inner=uniquifySvgIds(inner, opts.idPrefix);
+  // Re-tint tras uniquify: los selectores #outline ya fueron renombrados en <style>
+  if(opts.strokeColor){
+    const wrapped=applySvgStrokeColor(`<svg xmlns="http://www.w3.org/2000/svg">${inner}</svg>`, opts.strokeColor);
+    const o2=wrapped.match(/<svg\b[^>]*>/i);
+    const c2=wrapped.toLowerCase().lastIndexOf("</svg>");
+    if(o2 && c2>0) inner=wrapped.slice(o2.index+o2[0].length, c2);
+  }
   const svgInner=`<svg xmlns="http://www.w3.org/2000/svg" width="${(+w).toFixed(2)}" height="${(+h).toFixed(2)}" viewBox="${escapeAttribute(viewBox)}" preserveAspectRatio="xMidYMid meet" overflow="visible">${inner}</svg>`;
   if(opts.flipH){
     return `<g transform="translate(${(x+w).toFixed(2)} ${(+y).toFixed(2)}) scale(-1 1)">${svgInner}</g>`;
@@ -2393,14 +2413,19 @@ function rasterImageToSVG(src, x, y, w, h, flipH){
   return `<image x="${(+x).toFixed(2)}" y="${(+y).toFixed(2)}" ${attrs}/>`;
 }
 function renderImageToSVG(n){
-  const src=nodeImageSrc(n);
-  if(!src) return "";
+  if(!n || !n.img) return "";
   const x=n.x-n.w/2, y=n.y-n.h/2;
-  if(isSvgDataUrl(src)){
-    const xml=decodeSvgDataUrl(src);
-    return inlineSvgAt(xml, x, y, n.w, n.h, {flipH:!!n.flipH, idPrefix:`n${n.id}-`});
+  if(isSvgDataUrl(n.img)){
+    // Usar el SVG original + strokeColor (no el data-URL ya tintado):
+    // así el tint se aplica después del rename de ids y no se pierde en el export.
+    const xml=decodeSvgDataUrl(n.img);
+    return inlineSvgAt(xml, x, y, n.w, n.h, {
+      flipH:!!n.flipH,
+      idPrefix:`n${n.id}-`,
+      strokeColor:n.strokeColor||null
+    });
   }
-  return rasterImageToSVG(src, x, y, n.w, n.h, !!n.flipH);
+  return rasterImageToSVG(n.img, x, y, n.w, n.h, !!n.flipH);
 }
 function renderNodeToSVG(n, theme){
   const outline=nodeRectOutline(n);
@@ -2612,7 +2637,7 @@ async function ensureUPNG(){
   if(window.UPNG && window.UPNG.__cxAdgVendor) return;
   await new Promise((resolve,reject)=>{
     const s=document.createElement("script");
-    s.src="./vendor/UPNG.js?v=27";
+    s.src="./vendor/UPNG.js?v=28";
     s.async=true;
     s.onload=()=>{
       if(!window.UPNG||typeof window.UPNG.encode!=="function"){
@@ -2924,7 +2949,7 @@ async function exportGIF(scale, transparent, playOnce, areaMode="content"){
 
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator)) return;
-  const register=()=> navigator.serviceWorker.register("./sw.js?v=27").catch(console.error);
+  const register=()=> navigator.serviceWorker.register("./sw.js?v=28").catch(console.error);
   if(document.readyState==="complete") register();
   else window.addEventListener("load", register, {once:true});
 }
